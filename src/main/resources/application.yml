@@ -1,0 +1,202 @@
+spring:
+  application:
+    name: saas-foundation
+  profiles:
+    default: local
+
+  datasource:
+    url: jdbc:postgresql://localhost:5432/saas_foundation
+    username: saas_app
+    password: saas_app
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+      pool-name: saas-hikari
+      data-source-properties:
+        ApplicationName: saas-foundation
+        reWriteBatchedInserts: true
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+        order_inserts: true
+        order_updates: true
+        query:
+          fail_on_pagination_over_collection_fetch: true
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    user: saas
+    password: saas
+    url: jdbc:postgresql://localhost:5432/saas_foundation
+    baseline-on-migrate: true
+
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      timeout: 2s
+
+  kafka:
+    bootstrap-servers: localhost:9092
+    consumer:
+      group-id: saas-foundation
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      acks: all
+      properties:
+        enable.idempotence: true
+    listener:
+      ack-mode: record
+
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+    default-property-inclusion: non_null
+
+server:
+  port: 8080
+  error:
+    include-message: never
+    include-binding-errors: never
+    include-stacktrace: never
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: when_authorized
+  health:
+    livenessstate:
+      enabled: true
+    readinessstate:
+      enabled: true
+    redis:
+      enabled: true
+    circuitbreakers:
+      enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+        api.latency: true
+      percentiles:
+        http.server.requests: 0.5, 0.95, 0.99
+        api.latency: 0.5, 0.95, 0.99
+      slo:
+        http.server.requests: 50ms, 100ms, 200ms, 500ms, 1s
+        api.latency: 50ms, 100ms, 200ms, 500ms, 1s
+  tracing:
+    sampling:
+      probability: 1.0
+  otlp:
+    tracing:
+      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318/v1/traces}
+  observations:
+    annotations:
+      enabled: true
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      emailProvider:
+        registerHealthIndicator: true
+        slidingWindowType: COUNT_BASED
+        slidingWindowSize: 10
+        minimumNumberOfCalls: 5
+        failureRateThreshold: 50
+        waitDurationInOpenState: 10s
+        permittedNumberOfCallsInHalfOpenState: 3
+        automaticTransitionFromOpenToHalfOpenEnabled: true
+        recordExceptions:
+          - com.saas.foundation.integration.email.EmailProviderException
+          - java.io.IOException
+          - org.springframework.web.client.ResourceAccessException
+  retry:
+    instances:
+      emailProvider:
+        maxAttempts: 3
+        waitDuration: 200ms
+        enableExponentialBackoff: true
+        exponentialBackoffMultiplier: 2
+        retryExceptions:
+          - com.saas.foundation.integration.email.EmailProviderException
+          - java.io.IOException
+
+saas:
+  tenancy:
+    header-name: X-Tenant-ID
+    excluded-path-patterns:
+      - /actuator/**
+      - /error
+      - /v3/api-docs/**
+      - /swagger-ui/**
+  rate-limit:
+    enabled: true
+    capacity: 100
+    window: 1m
+    key-prefix: "rl:tenant:"
+    excluded-path-patterns:
+      - /actuator/**
+      - /error
+  kafka:
+    enabled: true
+    tenant-registered-topic: tenant.registered
+  integrations:
+    email:
+      simulated-failure-rate: 0.0
+
+logging:
+  level:
+    root: INFO
+    com.saas.foundation: INFO
+    org.hibernate.SQL: WARN
+
+---
+spring:
+  config:
+    activate:
+      on-profile: local
+
+logging:
+  level:
+    com.saas.foundation: DEBUG
+
+---
+spring:
+  config:
+    activate:
+      on-profile: test
+
+  flyway:
+    user: test
+    password: test
+
+  kafka:
+    listener:
+      auto-startup: false
+
+saas:
+  kafka:
+    enabled: false
+  rate-limit:
+    enabled: true
+    capacity: 100
+    window: 1m

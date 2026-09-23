@@ -1,0 +1,16 @@
+.git
+.github
+.idea
+.vscode
+*.iml
+target
+**/target
+.mvn/wrapper/maven-wrapper.jar
+docker/prometheus
+docker/grafana
+k8s
+*.md
+.env
+.env.*
+.DS_Store
+**/agent-transcripts

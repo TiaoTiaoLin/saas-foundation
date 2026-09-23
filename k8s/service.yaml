@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: saas-foundation
+  labels:
+    app.kubernetes.io/name: saas-foundation
+    app.kubernetes.io/part-of: saas-platform
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: saas-foundation
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
+  sessionAffinity: None
