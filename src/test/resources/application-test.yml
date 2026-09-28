@@ -1,11 +1,18 @@
 spring:
   main:
     allow-bean-definition-overriding: true
-  jpa:
-    hibernate:
-      ddl-auto: validate
-  flyway:
+
+  kafka:
+    listener:
+      auto-startup: false
+
+saas:
+  kafka:
+    enabled: false
+  rate-limit:
     enabled: true
+    capacity: 100
+    window: 1m
 
 logging:
   level:

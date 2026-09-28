@@ -10,7 +10,7 @@ import io.github.bucket4j.Bandwidth;
 import io.github.bucket4j.BucketConfiguration;
 import io.github.bucket4j.distributed.ExpirationAfterWriteStrategy;
 import io.github.bucket4j.distributed.proxy.ProxyManager;
-import io.github.bucket4j.redis.lettuce.cas.LettuceBasedProxyManager;
+import io.github.bucket4j.redis.lettuce.Bucket4jLettuce;
 import io.lettuce.core.RedisClient;
 import io.lettuce.core.RedisURI;
 import io.lettuce.core.api.StatefulRedisConnection;
@@ -47,9 +47,9 @@ public class RateLimitConfig {
             StatefulRedisConnection<String, byte[]> bucket4jRedisConnection,
             RateLimitProperties properties) {
         Duration keepAfterRefill = properties.window().multipliedBy(2);
-        return LettuceBasedProxyManager.builderFor(bucket4jRedisConnection)
-                .withExpirationStrategy(ExpirationAfterWriteStrategy.basedOnTimeForRefillingBucketUpToMax(keepAfterRefill))
-                .build();
+        return Bucket4jLettuce.casBasedBuilder(bucket4jRedisConnection)
+            .expirationAfterWrite(ExpirationAfterWriteStrategy.basedOnTimeForRefillingBucketUpToMax(keepAfterRefill))
+            .build();
     }
 
     @Bean

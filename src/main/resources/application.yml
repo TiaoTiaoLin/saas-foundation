@@ -1,8 +1,6 @@
 spring:
   application:
     name: saas-foundation
-  profiles:
-    default: local
 
   datasource:
     url: jdbc:postgresql://localhost:5432/saas_foundation
@@ -178,25 +176,3 @@ spring:
 logging:
   level:
     com.saas.foundation: DEBUG
-
----
-spring:
-  config:
-    activate:
-      on-profile: test
-
-  flyway:
-    user: test
-    password: test
-
-  kafka:
-    listener:
-      auto-startup: false
-
-saas:
-  kafka:
-    enabled: false
-  rate-limit:
-    enabled: true
-    capacity: 100
-    window: 1m
