@@ -156,6 +156,21 @@ saas:
     excluded-path-patterns:
       - /actuator/**
       - /error
+  auth-rate-limit:
+    enabled: true
+    key-prefix: "rl:auth:"
+    login-per-ip:
+      capacity: 20
+      window: 1m
+    login-per-email:
+      capacity: 5
+      window: 5m
+    signup-per-ip:
+      capacity: 5
+      window: 1h
+    refresh-per-ip:
+      capacity: 60
+      window: 1m
   kafka:
     enabled: true
     tenant-registered-topic: tenant.registered
@@ -166,6 +181,8 @@ saas:
     jwt:
       issuer: saas-foundation
       access-token-ttl: 15m
+    refresh-token:
+      ttl: 30d
 
 logging:
   level:

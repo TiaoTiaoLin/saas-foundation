@@ -1,5 +1,6 @@
 package com.saas.foundation.auth;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -19,19 +20,24 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.test.web.servlet.ResultMatcher;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.redis.testcontainers.RedisContainer;
 import com.saas.foundation.domain.tenant.Tenant;
 import com.saas.foundation.domain.tenant.TenantRepository;
 import com.saas.foundation.domain.user.MembershipRole;
+import com.saas.foundation.domain.user.RefreshToken;
+import com.saas.foundation.domain.user.RefreshTokenRepository;
 import com.saas.foundation.domain.user.TenantMembership;
 import com.saas.foundation.domain.user.TenantMembershipRepository;
 import com.saas.foundation.domain.user.UserAccount;
 import com.saas.foundation.domain.user.UserAccountRepository;
+import com.saas.foundation.security.Hashing;
 import com.saas.foundation.support.PostgresRedisContainers;
 
 @SpringBootTest
@@ -71,6 +77,9 @@ class AuthLoginIT {
 
     @Autowired
     TenantMembershipRepository tenantMembershipRepository;
+
+    @Autowired
+    RefreshTokenRepository refreshTokenRepository;
 
     @Test
     void loginTokenScopesProductRequestsToTheUsersTenant() throws Exception {
@@ -116,6 +125,60 @@ class AuthLoginIT {
     }
 
     @Test
+    void refreshIssuesWorkingTokensAndRotatesRefreshToken() throws Exception {
+        String email = uniqueEmail();
+        UUID tenantId = givenUserInNewTenant(email);
+        JsonNode login = loginTokens(email, PASSWORD);
+
+        JsonNode refreshed = refresh(login.get("refreshToken").asText(), status().isOk());
+
+        assertThat(refreshed.get("refreshToken").asText()).isNotEqualTo(login.get("refreshToken").asText());
+        assertThat(refreshed.get("tenantId").asText()).isEqualTo(tenantId.toString());
+        mockMvc.perform(get("/api/v1/products")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + refreshed.get("accessToken").asText()))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void reusingRotatedRefreshTokenRevokesTheSessionDurably() throws Exception {
+        String email = uniqueEmail();
+        givenUserInNewTenant(email);
+        String original = loginTokens(email, PASSWORD).get("refreshToken").asText();
+        String rotated = refresh(original, status().isOk()).get("refreshToken").asText();
+
+        refresh(original, status().isUnauthorized());
+
+        // The revocation must have been committed even though the reuse request failed.
+        refresh(rotated, status().isUnauthorized());
+    }
+
+    @Test
+    void logoutRevokesRefreshToken() throws Exception {
+        String email = uniqueEmail();
+        givenUserInNewTenant(email);
+        String refreshToken = loginTokens(email, PASSWORD).get("refreshToken").asText();
+
+        mockMvc.perform(post("/api/v1/auth/logout")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(refreshBody(refreshToken)))
+                .andExpect(status().isNoContent());
+
+        refresh(refreshToken, status().isUnauthorized());
+    }
+
+    @Test
+    void refreshTokenIsStoredOnlyAsHash() throws Exception {
+        String email = uniqueEmail();
+        givenUserInNewTenant(email);
+        String refreshToken = loginTokens(email, PASSWORD).get("refreshToken").asText();
+
+        assertThat(refreshTokenRepository.findAll())
+                .extracting(RefreshToken::getTokenHash)
+                .contains(Hashing.sha256Hex(refreshToken))
+                .doesNotContain(refreshToken);
+    }
+
+    @Test
     void invalidRequestBodyIsBadRequest() throws Exception {
         mockMvc.perform(post("/api/v1/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -133,10 +196,30 @@ class AuthLoginIT {
     }
 
     private String login(String email, String password) throws Exception {
+        return loginTokens(email, password).get("accessToken").asText();
+    }
+
+    private JsonNode loginTokens(String email, String password) throws Exception {
         MvcResult result = mockMvc.perform(loginRequest(email, password))
                 .andExpect(status().isOk())
                 .andReturn();
-        return objectMapper.readTree(result.getResponse().getContentAsString()).get("accessToken").asText();
+        return objectMapper.readTree(result.getResponse().getContentAsString());
+    }
+
+    private JsonNode refresh(String refreshToken, ResultMatcher expectedStatus) throws Exception {
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/refresh")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(refreshBody(refreshToken)))
+                .andExpect(expectedStatus)
+                .andReturn();
+        String body = result.getResponse().getContentAsString();
+        return body.isEmpty() ? null : objectMapper.readTree(body);
+    }
+
+    private static String refreshBody(String refreshToken) {
+        return """
+                {"refreshToken":"%s"}
+                """.formatted(refreshToken);
     }
 
     private static org.springframework.test.web.servlet.RequestBuilder loginRequest(String email, String password) {

@@ -19,7 +19,7 @@ import com.saas.foundation.security.JwtTokenService;
 
 /**
  * Stateless API security: requests authenticate with a Bearer access token issued by
- * {@link JwtTokenService}. Only signup, login and public actuator endpoints are open.
+ * {@link JwtTokenService}. Only signup, login/refresh/logout and public actuator endpoints are open.
  * Under the {@code local} profile, unauthenticated requests are still allowed so the API
  * can be exercised manually with only the tenant header.
  */
@@ -50,6 +50,8 @@ public class SecurityConfig {
                     auth.requestMatchers(HttpMethod.OPTIONS, "/**").permitAll();
                     auth.requestMatchers(HttpMethod.POST,
                             "/api/v1/auth/login",
+                            "/api/v1/auth/refresh",
+                            "/api/v1/auth/logout",
                             "/api/v1/tenants/registrations"
                     ).permitAll();
                     if (local) {

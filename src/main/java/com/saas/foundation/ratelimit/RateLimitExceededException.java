@@ -10,9 +10,18 @@ public class RateLimitExceededException extends RuntimeException {
     private final long retryAfterSeconds;
 
     public RateLimitExceededException(String tenantId, long retryAfterSeconds) {
-        super("Rate limit exceeded for tenant " + tenantId);
+        this("Rate limit exceeded for tenant " + tenantId, tenantId, retryAfterSeconds);
+    }
+
+    private RateLimitExceededException(String message, String tenantId, long retryAfterSeconds) {
+        super(message);
         this.tenantId = tenantId;
         this.retryAfterSeconds = Math.max(retryAfterSeconds, 1);
+    }
+
+    /** For limits on unauthenticated endpoints (signup, login, refresh) where there is no tenant. */
+    public static RateLimitExceededException withoutTenant(long retryAfterSeconds) {
+        return new RateLimitExceededException("Too many requests; try again later", null, retryAfterSeconds);
     }
 
     public String getTenantId() {

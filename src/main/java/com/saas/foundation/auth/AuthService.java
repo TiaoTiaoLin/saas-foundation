@@ -2,6 +2,7 @@ package com.saas.foundation.auth;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -9,8 +10,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import com.saas.foundation.auth.RefreshTokenService.IssuedRefreshToken;
 import com.saas.foundation.domain.tenant.Tenant;
 import com.saas.foundation.domain.tenant.TenantRepository;
+import com.saas.foundation.domain.user.RefreshToken;
 import com.saas.foundation.domain.user.TenantMembership;
 import com.saas.foundation.domain.user.TenantMembershipRepository;
 import com.saas.foundation.domain.user.UserAccount;
@@ -32,6 +35,7 @@ public class AuthService {
     private final TenantRepository tenantRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenService jwtTokenService;
+    private final RefreshTokenService refreshTokenService;
 
     /** Compared against when the email is unknown, so response time does not reveal which emails exist. */
     private final String dummyPasswordHash;
@@ -40,31 +44,60 @@ public class AuthService {
                        TenantMembershipRepository tenantMembershipRepository,
                        TenantRepository tenantRepository,
                        PasswordEncoder passwordEncoder,
-                       JwtTokenService jwtTokenService) {
+                       JwtTokenService jwtTokenService,
+                       RefreshTokenService refreshTokenService) {
         this.userAccountRepository = userAccountRepository;
         this.tenantMembershipRepository = tenantMembershipRepository;
         this.tenantRepository = tenantRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtTokenService = jwtTokenService;
+        this.refreshTokenService = refreshTokenService;
         this.dummyPasswordHash = passwordEncoder.encode("dummy-password-for-unknown-users");
     }
 
-    @Transactional(readOnly = true)
-    public LoginResponse login(LoginRequest request) {
+    @Transactional
+    public TokenResponse login(LoginRequest request) {
         UserAccount user = authenticate(request.email().trim(), request.password());
         TenantMembership membership = selectMembership(request, user);
+        requireActiveTenant(membership.getTenantId());
 
-        boolean tenantActive = tenantRepository.findById(membership.getTenantId())
-                .map(Tenant::isActive)
-                .orElse(false);
-        if (!tenantActive) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Tenant is not active");
-        }
-
-        IssuedToken token = jwtTokenService.issueAccessToken(
-                user.getId(), membership.getTenantId(), List.of(membership.getRole().name()));
+        IssuedRefreshToken refreshToken = refreshTokenService.issue(user.getId(), membership.getTenantId());
         log.info("Login succeeded userId={} tenantId={}", user.getId(), membership.getTenantId());
-        return new LoginResponse(token.value(), "Bearer", token.expiresAt(), membership.getTenantId());
+        return tokenResponse(user, membership, refreshToken);
+    }
+
+    @Transactional(noRollbackFor = RefreshTokenReuseException.class)
+    public TokenResponse refresh(String rawRefreshToken) {
+        RefreshToken current = refreshTokenService.requireUsable(rawRefreshToken);
+
+        UserAccount user = userAccountRepository.findById(current.getUserId())
+                .filter(UserAccount::isEnabled)
+                .orElseThrow(RefreshTokenService::invalid);
+        TenantMembership membership = tenantMembershipRepository
+                .findByTenantIdAndUserId(current.getTenantId(), current.getUserId())
+                .orElseThrow(RefreshTokenService::invalid);
+        requireActiveTenant(membership.getTenantId());
+
+        IssuedRefreshToken next = refreshTokenService.rotate(current);
+        return tokenResponse(user, membership, next);
+    }
+
+    @Transactional
+    public void logout(String rawRefreshToken) {
+        refreshTokenService.revoke(rawRefreshToken);
+    }
+
+    private TokenResponse tokenResponse(UserAccount user, TenantMembership membership,
+                                        IssuedRefreshToken refreshToken) {
+        IssuedToken accessToken = jwtTokenService.issueAccessToken(
+                user.getId(), membership.getTenantId(), List.of(membership.getRole().name()));
+        return new TokenResponse(
+                accessToken.value(),
+                "Bearer",
+                accessToken.expiresAt(),
+                refreshToken.value(),
+                refreshToken.expiresAt(),
+                membership.getTenantId());
     }
 
     private UserAccount authenticate(String email, String password) {
@@ -104,6 +137,13 @@ public class AuthService {
                     HttpStatus.BAD_REQUEST, "tenantId is required: user belongs to multiple tenants");
         }
         return memberships.get(0);
+    }
+
+    private void requireActiveTenant(UUID tenantId) {
+        boolean active = tenantRepository.findById(tenantId).map(Tenant::isActive).orElse(false);
+        if (!active) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Tenant is not active");
+        }
     }
 
     private static ResponseStatusException invalidCredentials() {

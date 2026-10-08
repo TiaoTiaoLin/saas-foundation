@@ -7,9 +7,12 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -26,13 +29,17 @@ import com.saas.foundation.domain.tenant.Tenant;
 import com.saas.foundation.domain.tenant.TenantRepository;
 import com.saas.foundation.domain.tenant.TenantStatus;
 import com.saas.foundation.domain.user.MembershipRole;
+import com.saas.foundation.domain.user.RefreshToken;
+import com.saas.foundation.domain.user.RefreshTokenRepository;
 import com.saas.foundation.domain.user.TenantMembership;
 import com.saas.foundation.domain.user.TenantMembershipRepository;
 import com.saas.foundation.domain.user.UserAccount;
 import com.saas.foundation.domain.user.UserAccountRepository;
+import com.saas.foundation.security.Hashing;
 import com.saas.foundation.security.JwtConfig;
 import com.saas.foundation.security.JwtProperties;
 import com.saas.foundation.security.JwtTokenService;
+import com.saas.foundation.security.RefreshTokenProperties;
 
 class AuthServiceTest {
 
@@ -48,25 +55,30 @@ class AuthServiceTest {
     private final UserAccountRepository users = mock(UserAccountRepository.class);
     private final TenantMembershipRepository memberships = mock(TenantMembershipRepository.class);
     private final TenantRepository tenants = mock(TenantRepository.class);
+    private final Map<String, RefreshToken> refreshTokensByHash = new ConcurrentHashMap<>();
+    private final RefreshTokenRepository refreshTokens = inMemoryRefreshTokens(refreshTokensByHash);
 
     private AuthService authService;
     private UserAccount user;
 
     @BeforeEach
     void setUp() {
-        JwtTokenService tokenService = new JwtTokenService(new JwtConfig().jwtEncoder(JWT_PROPERTIES), JWT_PROPERTIES);
-        authService = new AuthService(users, memberships, tenants, passwordEncoder, tokenService);
+        authService = authServiceWithRefreshTtl(Duration.ofDays(30));
 
         user = withId(new UserAccount(EMAIL, passwordEncoder.encode(PASSWORD)));
         when(users.findByEmail(any())).thenAnswer(inv ->
                 EMAIL.equalsIgnoreCase(inv.getArgument(0)) ? Optional.of(user) : Optional.empty());
+        when(users.findById(any())).thenAnswer(inv ->
+                user.getId().equals(inv.getArgument(0)) ? Optional.of(user) : Optional.empty());
     }
+
+    // ---- login ----
 
     @Test
     void singleMembershipLogsIntoThatTenant() {
         UUID tenantId = givenMembership(MembershipRole.OWNER, TenantStatus.ACTIVE);
 
-        LoginResponse response = authService.login(new LoginRequest(EMAIL, PASSWORD, null));
+        TokenResponse response = authService.login(new LoginRequest(EMAIL, PASSWORD, null));
 
         assertThat(response.tenantId()).isEqualTo(tenantId);
         assertThat(response.tokenType()).isEqualTo("Bearer");
@@ -78,10 +90,26 @@ class AuthServiceTest {
     }
 
     @Test
+    void loginIssuesRefreshTokenStoredOnlyAsHash() {
+        UUID tenantId = givenMembership(MembershipRole.OWNER, TenantStatus.ACTIVE);
+
+        TokenResponse response = authService.login(new LoginRequest(EMAIL, PASSWORD, null));
+
+        assertThat(response.refreshToken()).isNotBlank();
+        assertThat(response.refreshTokenExpiresAt()).isAfter(Instant.now().plus(Duration.ofDays(29)));
+        assertThat(refreshTokensByHash).doesNotContainKey(response.refreshToken());
+        RefreshToken stored = refreshTokensByHash.get(Hashing.sha256Hex(response.refreshToken()));
+        assertThat(stored).isNotNull();
+        assertThat(stored.getUserId()).isEqualTo(user.getId());
+        assertThat(stored.getTenantId()).isEqualTo(tenantId);
+        assertThat(stored.isRevoked()).isFalse();
+    }
+
+    @Test
     void emailIsTrimmedAndCaseInsensitive() {
         givenMembership(MembershipRole.MEMBER, TenantStatus.ACTIVE);
 
-        LoginResponse response = authService.login(new LoginRequest("  OWNER@Acme.test ", PASSWORD, null));
+        TokenResponse response = authService.login(new LoginRequest("  OWNER@Acme.test ", PASSWORD, null));
 
         assertThat(response.accessToken()).isNotBlank();
     }
@@ -91,6 +119,7 @@ class AuthServiceTest {
         givenMembership(MembershipRole.OWNER, TenantStatus.ACTIVE);
 
         assertStatus(() -> authService.login(new LoginRequest(EMAIL, "wrong", null)), HttpStatus.UNAUTHORIZED);
+        assertThat(refreshTokensByHash).isEmpty();
     }
 
     @Test
@@ -126,7 +155,7 @@ class AuthServiceTest {
 
         assertStatus(() -> authService.login(new LoginRequest(EMAIL, PASSWORD, null)), HttpStatus.BAD_REQUEST);
 
-        LoginResponse response = authService.login(new LoginRequest(EMAIL, PASSWORD, second));
+        TokenResponse response = authService.login(new LoginRequest(EMAIL, PASSWORD, second));
         assertThat(response.tenantId()).isEqualTo(second);
         assertThat(jwtDecoder.decode(response.accessToken()).getClaimAsStringList(JwtTokenService.ROLES_CLAIM))
                 .containsExactly("MEMBER");
@@ -154,22 +183,149 @@ class AuthServiceTest {
         assertStatus(() -> authService.login(new LoginRequest(EMAIL, PASSWORD, null)), HttpStatus.FORBIDDEN);
     }
 
+    // ---- refresh ----
+
+    @Test
+    void refreshRotatesTheRefreshTokenAndIssuesNewAccessToken() {
+        UUID tenantId = givenMembership(MembershipRole.ADMIN, TenantStatus.ACTIVE);
+        TokenResponse login = authService.login(new LoginRequest(EMAIL, PASSWORD, null));
+
+        TokenResponse refreshed = authService.refresh(login.refreshToken());
+
+        assertThat(refreshed.refreshToken()).isNotEqualTo(login.refreshToken());
+        assertThat(refreshed.tenantId()).isEqualTo(tenantId);
+        Jwt jwt = jwtDecoder.decode(refreshed.accessToken());
+        assertThat(jwt.getClaimAsString(JwtTokenService.TENANT_ID_CLAIM)).isEqualTo(tenantId.toString());
+        assertThat(jwt.getClaimAsStringList(JwtTokenService.ROLES_CLAIM)).containsExactly("ADMIN");
+
+        RefreshToken old = refreshTokensByHash.get(Hashing.sha256Hex(login.refreshToken()));
+        RefreshToken next = refreshTokensByHash.get(Hashing.sha256Hex(refreshed.refreshToken()));
+        assertThat(old.isRevoked()).isTrue();
+        assertThat(old.getReplacedBy()).isEqualTo(next.getId());
+        assertThat(next.isRevoked()).isFalse();
+    }
+
+    @Test
+    void reusingARotatedTokenRevokesTheWholeSession() {
+        givenMembership(MembershipRole.OWNER, TenantStatus.ACTIVE);
+        TokenResponse login = authService.login(new LoginRequest(EMAIL, PASSWORD, null));
+        TokenResponse refreshed = authService.refresh(login.refreshToken());
+
+        assertThatThrownBy(() -> authService.refresh(login.refreshToken()))
+                .isInstanceOf(RefreshTokenReuseException.class);
+
+        assertStatus(() -> authService.refresh(refreshed.refreshToken()), HttpStatus.UNAUTHORIZED);
+        assertThat(refreshTokensByHash.values()).allMatch(RefreshToken::isRevoked);
+    }
+
+    @Test
+    void loggedOutTokenCannotRefreshAndIsNotTreatedAsReuse() {
+        givenMembership(MembershipRole.OWNER, TenantStatus.ACTIVE);
+        TokenResponse login = authService.login(new LoginRequest(EMAIL, PASSWORD, null));
+
+        authService.logout(login.refreshToken());
+        authService.logout(login.refreshToken());
+
+        assertThatThrownBy(() -> authService.refresh(login.refreshToken()))
+                .isInstanceOfSatisfying(ResponseStatusException.class, ex -> {
+                    assertThat(ex).isNotInstanceOf(RefreshTokenReuseException.class);
+                    assertThat(ex.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+                });
+    }
+
+    @Test
+    void unknownRefreshTokenIsUnauthorized() {
+        assertStatus(() -> authService.refresh("not-a-real-token"), HttpStatus.UNAUTHORIZED);
+    }
+
+    @Test
+    void expiredRefreshTokenIsUnauthorized() {
+        givenMembership(MembershipRole.OWNER, TenantStatus.ACTIVE);
+        AuthService expiringImmediately = authServiceWithRefreshTtl(Duration.ZERO);
+        TokenResponse login = expiringImmediately.login(new LoginRequest(EMAIL, PASSWORD, null));
+
+        assertStatus(() -> expiringImmediately.refresh(login.refreshToken()), HttpStatus.UNAUTHORIZED);
+    }
+
+    @Test
+    void refreshFailsAfterMembershipIsRemoved() {
+        UUID tenantId = givenMembership(MembershipRole.OWNER, TenantStatus.ACTIVE);
+        TokenResponse login = authService.login(new LoginRequest(EMAIL, PASSWORD, null));
+        when(memberships.findByTenantIdAndUserId(tenantId, user.getId())).thenReturn(Optional.empty());
+
+        assertStatus(() -> authService.refresh(login.refreshToken()), HttpStatus.UNAUTHORIZED);
+    }
+
+    @Test
+    void refreshFailsForDisabledUser() {
+        givenMembership(MembershipRole.OWNER, TenantStatus.ACTIVE);
+        TokenResponse login = authService.login(new LoginRequest(EMAIL, PASSWORD, null));
+        user.setEnabled(false);
+
+        assertStatus(() -> authService.refresh(login.refreshToken()), HttpStatus.UNAUTHORIZED);
+    }
+
+    @Test
+    void refreshFailsForSuspendedTenant() {
+        UUID tenantId = givenMembership(MembershipRole.OWNER, TenantStatus.ACTIVE);
+        TokenResponse login = authService.login(new LoginRequest(EMAIL, PASSWORD, null));
+        tenants.findById(tenantId).orElseThrow().setStatus(TenantStatus.SUSPENDED);
+
+        assertStatus(() -> authService.refresh(login.refreshToken()), HttpStatus.FORBIDDEN);
+    }
+
+    // ---- helpers ----
+
+    private AuthService authServiceWithRefreshTtl(Duration refreshTtl) {
+        JwtTokenService tokenService = new JwtTokenService(new JwtConfig().jwtEncoder(JWT_PROPERTIES), JWT_PROPERTIES);
+        RefreshTokenService refreshTokenService =
+                new RefreshTokenService(refreshTokens, new RefreshTokenProperties(refreshTtl));
+        return new AuthService(users, memberships, tenants, passwordEncoder, tokenService, refreshTokenService);
+    }
+
     private UUID givenMembership(MembershipRole role, TenantStatus status) {
         Tenant tenant = withId(new Tenant("Acme"));
         tenant.setStatus(status);
+        TenantMembership membership = new TenantMembership(tenant.getId(), user.getId(), role);
         when(tenants.findById(tenant.getId())).thenReturn(Optional.of(tenant));
-        when(memberships.findByUserId(user.getId()))
-                .thenReturn(List.of(new TenantMembership(tenant.getId(), user.getId(), role)));
+        when(memberships.findByUserId(user.getId())).thenReturn(List.of(membership));
+        when(memberships.findByTenantIdAndUserId(tenant.getId(), user.getId())).thenReturn(Optional.of(membership));
         return tenant.getId();
     }
 
     private UUID givenAdditionalMembership(UUID existingTenantId, MembershipRole role) {
         Tenant tenant = withId(new Tenant("Globex"));
+        TenantMembership membership = new TenantMembership(tenant.getId(), user.getId(), role);
         when(tenants.findById(tenant.getId())).thenReturn(Optional.of(tenant));
         when(memberships.findByUserId(user.getId())).thenReturn(List.of(
-                new TenantMembership(existingTenantId, user.getId(), MembershipRole.OWNER),
-                new TenantMembership(tenant.getId(), user.getId(), role)));
+                new TenantMembership(existingTenantId, user.getId(), MembershipRole.OWNER), membership));
+        when(memberships.findByTenantIdAndUserId(tenant.getId(), user.getId())).thenReturn(Optional.of(membership));
         return tenant.getId();
+    }
+
+    private static RefreshTokenRepository inMemoryRefreshTokens(Map<String, RefreshToken> byHash) {
+        RefreshTokenRepository repository = mock(RefreshTokenRepository.class);
+        when(repository.save(any(RefreshToken.class))).thenAnswer(inv -> {
+            RefreshToken token = inv.getArgument(0);
+            ReflectionTestUtils.invokeMethod(token, "onPersist");
+            byHash.put(token.getTokenHash(), token);
+            return token;
+        });
+        when(repository.findByTokenHash(any())).thenAnswer(inv -> Optional.ofNullable(byHash.get(inv.getArgument(0))));
+        when(repository.revokeAllActive(any(), any(), any())).thenAnswer(inv -> {
+            UUID userId = inv.getArgument(0);
+            UUID tenantId = inv.getArgument(1);
+            Instant now = inv.getArgument(2);
+            int revoked = 0;
+            for (RefreshToken token : byHash.values()) {
+                if (token.getUserId().equals(userId) && token.getTenantId().equals(tenantId) && !token.isRevoked()) {
+                    token.revoke(now);
+                    revoked++;
+                }
+            }
+            return revoked;
+        });
+        return repository;
     }
 
     private static <T> T withId(T entity) {
@@ -177,8 +333,8 @@ class AuthServiceTest {
         return entity;
     }
 
-    private static void assertStatus(Runnable login, HttpStatusCode expected) {
-        assertThatThrownBy(login::run)
+    private static void assertStatus(Runnable action, HttpStatusCode expected) {
+        assertThatThrownBy(action::run)
                 .isInstanceOfSatisfying(ResponseStatusException.class,
                         ex -> assertThat(ex.getStatusCode()).isEqualTo(expected));
     }

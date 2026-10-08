@@ -8,6 +8,9 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.saas.foundation.ratelimit.AuthRateLimiter;
+
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 
@@ -18,9 +21,12 @@ import lombok.RequiredArgsConstructor;
 public class TenantRegistrationController {
 
     private final TenantRegistrationService tenantRegistrationService;
+    private final AuthRateLimiter authRateLimiter;
 
     @PostMapping("/registrations")
-    public ResponseEntity<RegisterTenantResponse> register(@Valid @RequestBody RegisterTenantRequest request) {
+    public ResponseEntity<RegisterTenantResponse> register(@Valid @RequestBody RegisterTenantRequest request,
+                                                           HttpServletRequest httpRequest) {
+        authRateLimiter.checkSignup(httpRequest.getRemoteAddr());
         RegisterTenantResponse response = tenantRegistrationService.register(request);
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }

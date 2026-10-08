@@ -1,0 +1,22 @@
+package com.saas.foundation.security;
+
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
+
+public final class Hashing {
+
+    private Hashing() {
+    }
+
+    /** Lowercase hex SHA-256 (64 characters). Not for passwords; use {@code PasswordEncoder} for those. */
+    public static String sha256Hex(String value) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(digest);
+        } catch (NoSuchAlgorithmException ex) {
+            throw new IllegalStateException("SHA-256 is required by every Java runtime", ex);
+        }
+    }
+}
