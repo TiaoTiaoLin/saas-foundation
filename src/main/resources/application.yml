@@ -146,6 +146,7 @@ saas:
       - /error
       - /v3/api-docs/**
       - /swagger-ui/**
+      - /api/v1/auth/**
   rate-limit:
     enabled: true
     capacity: 100

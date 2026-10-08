@@ -47,6 +47,7 @@ public class SecurityConfig {
                             "/actuator/prometheus"
                     ).permitAll();
                     auth.requestMatchers(HttpMethod.OPTIONS, "/**").permitAll();
+                    auth.requestMatchers(HttpMethod.POST, "/api/v1/auth/login").permitAll();
                     if (localOrTest) {
                         auth.anyRequest().permitAll();
                     } else {
