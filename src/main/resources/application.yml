@@ -141,6 +141,8 @@ resilience4j:
 saas:
   tenancy:
     header-name: X-Tenant-ID
+    active-cache-key-prefix: "tenant:active:"
+    active-cache-ttl: 1m
     excluded-path-patterns:
       - /actuator/**
       - /error

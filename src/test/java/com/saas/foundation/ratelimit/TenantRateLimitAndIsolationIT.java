@@ -6,6 +6,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -24,8 +25,11 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.redis.testcontainers.RedisContainer;
+import com.saas.foundation.domain.tenant.TenantRepository;
+import com.saas.foundation.domain.tenant.TenantStatus;
 import com.saas.foundation.security.JwtTokenService;
 import com.saas.foundation.support.PostgresRedisContainers;
+import com.saas.foundation.support.TestTenants;
 import com.saas.foundation.support.TestTokens;
 
 @SpringBootTest
@@ -61,6 +65,15 @@ class TenantRateLimitAndIsolationIT {
 
     @Autowired
     JwtTokenService tokenService;
+
+    @Autowired
+    TenantRepository tenantRepository;
+
+    @BeforeEach
+    void seedTenants() {
+        TestTenants.ensure(tenantRepository, TENANT_A, TenantStatus.ACTIVE);
+        TestTenants.ensure(tenantRepository, TENANT_B, TenantStatus.ACTIVE);
+    }
 
     @Test
     void tenantIsolationIsPreservedUnderRateLimiting() throws Exception {

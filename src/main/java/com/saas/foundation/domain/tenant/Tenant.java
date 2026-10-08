@@ -4,6 +4,7 @@ import com.saas.foundation.domain.common.AuditedEntity;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EntityListeners;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Table;
@@ -13,6 +14,7 @@ import lombok.Setter;
 
 @Entity
 @Table(name = "tenants")
+@EntityListeners(TenantPersistenceListener.class)
 @Getter
 @Setter
 @NoArgsConstructor

@@ -10,6 +10,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import java.time.Duration;
 import java.util.UUID;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -28,10 +29,14 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.redis.testcontainers.RedisContainer;
+import com.saas.foundation.domain.tenant.Tenant;
+import com.saas.foundation.domain.tenant.TenantRepository;
+import com.saas.foundation.domain.tenant.TenantStatus;
 import com.saas.foundation.security.JwtConfig;
 import com.saas.foundation.security.JwtProperties;
 import com.saas.foundation.security.JwtTokenService;
 import com.saas.foundation.support.PostgresRedisContainers;
+import com.saas.foundation.support.TestTenants;
 import com.saas.foundation.support.TestTokens;
 
 @SpringBootTest
@@ -44,6 +49,8 @@ class ProductTenantIsolationIT {
     private static final String TENANT_B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
     private static final String TENANT_C = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
     private static final String TENANT_E = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+    private static final String TENANT_SUSPENDED = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+    private static final String TENANT_UNKNOWN = "ffffffff-ffff-4fff-8fff-ffffffffffff";
 
     @Container
     static final PostgreSQLContainer<?> POSTGRES = PostgresRedisContainers.postgres();
@@ -68,6 +75,16 @@ class ProductTenantIsolationIT {
 
     @Autowired
     JwtProperties jwtProperties;
+
+    @Autowired
+    TenantRepository tenantRepository;
+
+    @BeforeEach
+    void seedTenants() {
+        TestTenants.ensure(tenantRepository, TENANT_A, TenantStatus.ACTIVE);
+        TestTenants.ensure(tenantRepository, TENANT_B, TenantStatus.ACTIVE);
+        TestTenants.ensure(tenantRepository, TENANT_C, TenantStatus.ACTIVE);
+    }
 
     @Test
     void requestWithoutTokenIsUnauthorized() throws Exception {
@@ -164,6 +181,30 @@ class ProductTenantIsolationIT {
                         .header(HttpHeaders.AUTHORIZATION, bearer(TENANT_C))
                         .header("X-Tenant-ID", TENANT_E))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void unknownTenantTokenIsRejected() throws Exception {
+        mockMvc.perform(get("/api/v1/products")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(TENANT_UNKNOWN)))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void suspendingTenantRejectsAnExistingAccessToken() throws Exception {
+        TestTenants.ensure(tenantRepository, TENANT_SUSPENDED, TenantStatus.ACTIVE);
+
+        mockMvc.perform(get("/api/v1/products")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(TENANT_SUSPENDED)))
+                .andExpect(status().isOk());
+
+        Tenant tenant = tenantRepository.findById(UUID.fromString(TENANT_SUSPENDED)).orElseThrow();
+        tenant.setStatus(TenantStatus.SUSPENDED);
+        tenantRepository.saveAndFlush(tenant);
+
+        mockMvc.perform(get("/api/v1/products")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(TENANT_SUSPENDED)))
+                .andExpect(status().isBadRequest());
     }
 
     @Test

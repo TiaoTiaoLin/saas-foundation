@@ -1,8 +1,8 @@
 package com.saas.foundation.tenant;
 
 /**
- * Extension point for resolving whether a tenant is active / provisioned.
- * Default implementation accepts any well-formed UUID (format already validated by interceptor).
+ * Whether a tenant exists and is allowed to serve requests.
+ * The caller validates the identifier format before this is invoked.
  */
 public interface TenantResolver {
 
