@@ -19,8 +19,9 @@ import com.saas.foundation.security.JwtTokenService;
 
 /**
  * Stateless API security: requests authenticate with a Bearer access token issued by
- * {@link JwtTokenService}. Under {@code local} and {@code test}, unauthenticated requests
- * are still allowed so the API can be exercised with only the tenant header.
+ * {@link JwtTokenService}. Only signup, login and public actuator endpoints are open.
+ * Under the {@code local} profile, unauthenticated requests are still allowed so the API
+ * can be exercised manually with only the tenant header.
  */
 @Configuration
 @EnableWebSecurity
@@ -29,7 +30,7 @@ public class SecurityConfig {
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http, Environment environment) throws Exception {
-        boolean localOrTest = environment.acceptsProfiles(Profiles.of("local", "test"));
+        boolean local = environment.acceptsProfiles(Profiles.of("local"));
 
         http
                 .csrf(AbstractHttpConfigurer::disable)
@@ -47,8 +48,11 @@ public class SecurityConfig {
                             "/actuator/prometheus"
                     ).permitAll();
                     auth.requestMatchers(HttpMethod.OPTIONS, "/**").permitAll();
-                    auth.requestMatchers(HttpMethod.POST, "/api/v1/auth/login").permitAll();
-                    if (localOrTest) {
+                    auth.requestMatchers(HttpMethod.POST,
+                            "/api/v1/auth/login",
+                            "/api/v1/tenants/registrations"
+                    ).permitAll();
+                    if (local) {
                         auth.anyRequest().permitAll();
                     } else {
                         auth.anyRequest().authenticated();

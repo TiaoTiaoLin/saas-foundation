@@ -147,6 +147,7 @@ saas:
       - /v3/api-docs/**
       - /swagger-ui/**
       - /api/v1/auth/**
+      - /api/v1/tenants/registrations
   rate-limit:
     enabled: true
     capacity: 100

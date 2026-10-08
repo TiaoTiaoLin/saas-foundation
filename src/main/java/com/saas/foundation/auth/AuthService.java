@@ -1,6 +1,5 @@
 package com.saas.foundation.auth;
 
-import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Optional;
 
@@ -18,6 +17,7 @@ import com.saas.foundation.domain.user.UserAccount;
 import com.saas.foundation.domain.user.UserAccountRepository;
 import com.saas.foundation.security.JwtTokenService;
 import com.saas.foundation.security.JwtTokenService.IssuedToken;
+import com.saas.foundation.security.PasswordConfig;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -26,9 +26,6 @@ import lombok.extern.slf4j.Slf4j;
 public class AuthService {
 
     static final String INVALID_CREDENTIALS = "Invalid email or password";
-
-    /** BCrypt only reads the first 72 bytes; longer passwords are rejected rather than truncated. */
-    static final int MAX_PASSWORD_BYTES = 72;
 
     private final UserAccountRepository userAccountRepository;
     private final TenantMembershipRepository tenantMembershipRepository;
@@ -71,7 +68,7 @@ public class AuthService {
     }
 
     private UserAccount authenticate(String email, String password) {
-        if (password.getBytes(StandardCharsets.UTF_8).length > MAX_PASSWORD_BYTES) {
+        if (PasswordConfig.exceedsMaxPasswordBytes(password)) {
             throw invalidCredentials();
         }
 

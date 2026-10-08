@@ -1,5 +1,6 @@
 package com.saas.foundation.security;
 
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
 import org.springframework.context.annotation.Bean;
@@ -13,6 +14,13 @@ public class PasswordConfig {
 
     static final String BCRYPT_ID = "bcrypt";
     static final int BCRYPT_STRENGTH = 12;
+
+    /** BCrypt only reads the first 72 bytes; longer passwords must be rejected rather than truncated. */
+    public static final int MAX_PASSWORD_BYTES = 72;
+
+    public static boolean exceedsMaxPasswordBytes(String password) {
+        return password.getBytes(StandardCharsets.UTF_8).length > MAX_PASSWORD_BYTES;
+    }
 
     /**
      * Hashes are stored with an algorithm prefix (e.g. {@code {bcrypt}$2a$12$...}) so the

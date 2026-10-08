@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -23,7 +24,9 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.redis.testcontainers.RedisContainer;
+import com.saas.foundation.security.JwtTokenService;
 import com.saas.foundation.support.PostgresRedisContainers;
+import com.saas.foundation.support.TestTokens;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -56,10 +59,13 @@ class TenantRateLimitAndIsolationIT {
     @Autowired
     ObjectMapper objectMapper;
 
+    @Autowired
+    JwtTokenService tokenService;
+
     @Test
     void tenantIsolationIsPreservedUnderRateLimiting() throws Exception {
         mockMvc.perform(post("/api/v1/products")
-                        .header("X-Tenant-ID", TENANT_A)
+                        .header(HttpHeaders.AUTHORIZATION, bearer(TENANT_A))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"name":"Alpha","sku":"ISO-A"}
@@ -67,21 +73,23 @@ class TenantRateLimitAndIsolationIT {
                 .andExpect(status().isCreated());
 
         mockMvc.perform(post("/api/v1/products")
-                        .header("X-Tenant-ID", TENANT_B)
+                        .header(HttpHeaders.AUTHORIZATION, bearer(TENANT_B))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"name":"Beta","sku":"ISO-B"}
                                 """))
                 .andExpect(status().isCreated());
 
-        MvcResult aList = mockMvc.perform(get("/api/v1/products").header("X-Tenant-ID", TENANT_A))
+        MvcResult aList = mockMvc.perform(get("/api/v1/products")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(TENANT_A)))
                 .andExpect(status().isOk())
                 .andReturn();
         JsonNode aProducts = objectMapper.readTree(aList.getResponse().getContentAsString());
         assertThat(aProducts).hasSize(1);
         assertThat(aProducts.get(0).get("sku").asText()).isEqualTo("ISO-A");
 
-        MvcResult bList = mockMvc.perform(get("/api/v1/products").header("X-Tenant-ID", TENANT_B))
+        MvcResult bList = mockMvc.perform(get("/api/v1/products")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(TENANT_B)))
                 .andExpect(status().isOk())
                 .andReturn();
         JsonNode bProducts = objectMapper.readTree(bList.getResponse().getContentAsString());
@@ -91,18 +99,25 @@ class TenantRateLimitAndIsolationIT {
 
     @Test
     void rateLimitIsEnforcedPerTenantIndependently() throws Exception {
+        String tenantA = bearer(TENANT_A);
+        String tenantB = bearer(TENANT_B);
+
         // Exhaust tenant A's budget (capacity = 5)
         for (int i = 0; i < 5; i++) {
-            mockMvc.perform(get("/api/v1/products").header("X-Tenant-ID", TENANT_A))
+            mockMvc.perform(get("/api/v1/products").header(HttpHeaders.AUTHORIZATION, tenantA))
                     .andExpect(status().isOk());
         }
 
-        mockMvc.perform(get("/api/v1/products").header("X-Tenant-ID", TENANT_A))
+        mockMvc.perform(get("/api/v1/products").header(HttpHeaders.AUTHORIZATION, tenantA))
                 .andExpect(status().isTooManyRequests())
                 .andExpect(header().exists("Retry-After"));
 
         // Tenant B still has its own independent quota
-        mockMvc.perform(get("/api/v1/products").header("X-Tenant-ID", TENANT_B))
+        mockMvc.perform(get("/api/v1/products").header(HttpHeaders.AUTHORIZATION, tenantB))
                 .andExpect(status().isOk());
+    }
+
+    private String bearer(String tenantId) {
+        return TestTokens.bearer(tokenService, tenantId);
     }
 }
