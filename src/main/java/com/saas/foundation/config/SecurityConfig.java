@@ -11,11 +11,16 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
+import org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter;
 import org.springframework.security.web.SecurityFilterChain;
 
+import com.saas.foundation.security.JwtTokenService;
+
 /**
- * Stateless API security baseline. Replace {@code anyRequest().permitAll()} under {@code local}
- * with JWT resource-server configuration before production cutover.
+ * Stateless API security: requests authenticate with a Bearer access token issued by
+ * {@link JwtTokenService}. Under {@code local} and {@code test}, unauthenticated requests
+ * are still allowed so the API can be exercised with only the tenant header.
  */
 @Configuration
 @EnableWebSecurity
@@ -32,6 +37,8 @@ public class SecurityConfig {
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .httpBasic(AbstractHttpConfigurer::disable)
                 .formLogin(AbstractHttpConfigurer::disable)
+                .oauth2ResourceServer(oauth2 -> oauth2
+                        .jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter())))
                 .authorizeHttpRequests(auth -> {
                     auth.requestMatchers(
                             "/actuator/health",
@@ -48,5 +55,15 @@ public class SecurityConfig {
                 });
 
         return http.build();
+    }
+
+    private static JwtAuthenticationConverter jwtAuthenticationConverter() {
+        JwtGrantedAuthoritiesConverter authorities = new JwtGrantedAuthoritiesConverter();
+        authorities.setAuthoritiesClaimName(JwtTokenService.ROLES_CLAIM);
+        authorities.setAuthorityPrefix("ROLE_");
+
+        JwtAuthenticationConverter converter = new JwtAuthenticationConverter();
+        converter.setJwtGrantedAuthoritiesConverter(authorities);
+        return converter;
     }
 }

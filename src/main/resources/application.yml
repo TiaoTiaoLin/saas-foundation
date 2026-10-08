@@ -160,6 +160,10 @@ saas:
   integrations:
     email:
       simulated-failure-rate: 0.0
+  security:
+    jwt:
+      issuer: saas-foundation
+      access-token-ttl: 15m
 
 logging:
   level:
@@ -172,6 +176,11 @@ spring:
   config:
     activate:
       on-profile: local
+
+saas:
+  security:
+    jwt:
+      secret: local-dev-only-jwt-secret-not-for-production
 
 logging:
   level:

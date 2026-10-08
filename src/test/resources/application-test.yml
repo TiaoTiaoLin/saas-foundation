@@ -9,6 +9,9 @@ spring:
 saas:
   kafka:
     enabled: false
+  security:
+    jwt:
+      secret: test-only-jwt-secret-at-least-32-bytes-long
   rate-limit:
     enabled: true
     capacity: 100

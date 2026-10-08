@@ -1,6 +1,7 @@
 package com.saas.foundation.product;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -25,6 +26,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.redis.testcontainers.RedisContainer;
+import com.saas.foundation.security.JwtTokenService;
 import com.saas.foundation.support.PostgresRedisContainers;
 
 @SpringBootTest
@@ -35,6 +37,8 @@ class ProductTenantIsolationIT {
 
     private static final String TENANT_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
     private static final String TENANT_B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    private static final String TENANT_C = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+    private static final String TENANT_E = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
 
     @Container
     static final PostgreSQLContainer<?> POSTGRES = PostgresRedisContainers.postgres();
@@ -117,5 +121,41 @@ class ProductTenantIsolationIT {
         mockMvc.perform(get("/api/v1/products/" + productId)
                         .header("X-Tenant-ID", TENANT_B))
                 .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void authenticatedRequestUsesTenantFromToken() throws Exception {
+        mockMvc.perform(post("/api/v1/products")
+                        .with(jwt().jwt(token -> token.claim(JwtTokenService.TENANT_ID_CLAIM, TENANT_C)))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name":"Token Widget","sku":"TOK-1"}
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.tenantId").value(TENANT_C));
+    }
+
+    @Test
+    void headerMatchingTokenTenantIsAccepted() throws Exception {
+        mockMvc.perform(get("/api/v1/products")
+                        .with(jwt().jwt(token -> token.claim(JwtTokenService.TENANT_ID_CLAIM, TENANT_C)))
+                        .header("X-Tenant-ID", TENANT_C.toUpperCase()))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void headerCannotSwitchTenantForAuthenticatedUser() throws Exception {
+        mockMvc.perform(get("/api/v1/products")
+                        .with(jwt().jwt(token -> token.claim(JwtTokenService.TENANT_ID_CLAIM, TENANT_C)))
+                        .header("X-Tenant-ID", TENANT_E))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void tokenWithoutTenantIsRejected() throws Exception {
+        mockMvc.perform(get("/api/v1/products")
+                        .with(jwt())
+                        .header("X-Tenant-ID", TENANT_C))
+                .andExpect(status().isForbidden());
     }
 }

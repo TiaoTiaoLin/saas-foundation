@@ -3,15 +3,20 @@ package com.saas.foundation.tenant.web;
 import java.util.UUID;
 import java.util.regex.Pattern;
 
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.stereotype.Component;
 import org.springframework.util.AntPathMatcher;
 import org.springframework.web.servlet.HandlerInterceptor;
 
+import com.saas.foundation.security.JwtTokenService;
 import com.saas.foundation.tenant.TenancyProperties;
 import com.saas.foundation.tenant.TenantContext;
 import com.saas.foundation.tenant.TenantResolver;
 import com.saas.foundation.tenant.exception.InvalidTenantException;
 import com.saas.foundation.tenant.exception.MissingTenantException;
+import com.saas.foundation.tenant.exception.TenantAccessDeniedException;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -19,7 +24,12 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * Binds {@code X-Tenant-ID} (configurable) onto {@link TenantContext} for the request lifecycle.
+ * Binds the request's tenant onto {@link TenantContext} for the request lifecycle.
+ *
+ * <p>For JWT-authenticated requests the tenant comes from the token's
+ * {@value JwtTokenService#TENANT_ID_CLAIM} claim; a tenant header, if sent, must match it.
+ * Unauthenticated requests (only reachable where security permits them) fall back to the
+ * {@code X-Tenant-ID} header (configurable).
  */
 @Slf4j
 @Component
@@ -41,25 +51,30 @@ public class TenantInterceptor implements HandlerInterceptor {
         }
 
         String headerName = tenancyProperties.headerName();
-        String rawTenantId = request.getHeader(headerName);
+        String rawHeaderTenantId = request.getHeader(headerName);
+        boolean headerPresent = rawHeaderTenantId != null && !rawHeaderTenantId.isBlank();
 
-        if (rawTenantId == null || rawTenantId.isBlank()) {
-            throw new MissingTenantException("Request header '" + headerName + "' is required");
+        String tenantId;
+        String tokenTenantId = tenantIdFromToken();
+        if (tokenTenantId != null) {
+            if (headerPresent && !tokenTenantId.equals(normalize(rawHeaderTenantId))) {
+                throw new TenantAccessDeniedException(
+                        "Header '" + headerName + "' does not match the authenticated tenant");
+            }
+            tenantId = tokenTenantId;
+        } else {
+            if (!headerPresent) {
+                throw new MissingTenantException("Request header '" + headerName + "' is required");
+            }
+            tenantId = normalize(rawHeaderTenantId);
         }
 
-        String tenantId = rawTenantId.trim();
-        if (!isValidUuid(tenantId)) {
+        if (!tenantResolver.isActive(tenantId)) {
             throw new InvalidTenantException(tenantId);
         }
 
-        // Normalize to canonical UUID string
-        String normalized = UUID.fromString(tenantId).toString();
-        if (!tenantResolver.isActive(normalized)) {
-            throw new InvalidTenantException(normalized);
-        }
-
-        TenantContext.setTenantId(normalized);
-        log.debug("Bound tenant context: tenantId={}", normalized);
+        TenantContext.setTenantId(tenantId);
+        log.debug("Bound tenant context: tenantId={} fromToken={}", tenantId, tokenTenantId != null);
         return true;
     }
 
@@ -69,10 +84,31 @@ public class TenantInterceptor implements HandlerInterceptor {
         TenantContext.clear();
     }
 
+    private static String tenantIdFromToken() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (!(authentication instanceof JwtAuthenticationToken jwtAuthentication)) {
+            return null;
+        }
+        String claim = jwtAuthentication.getToken().getClaimAsString(JwtTokenService.TENANT_ID_CLAIM);
+        if (claim == null || claim.isBlank()) {
+            throw new TenantAccessDeniedException("Access token has no tenant");
+        }
+        return normalize(claim);
+    }
+
     private boolean isExcluded(HttpServletRequest request) {
         String path = request.getRequestURI();
         return tenancyProperties.excludedPathPatterns().stream()
                 .anyMatch(pattern -> pathMatcher.match(pattern, path));
+    }
+
+    /** Validates the identifier and returns it as a canonical lowercase UUID string. */
+    private static String normalize(String rawTenantId) {
+        String tenantId = rawTenantId.trim();
+        if (!isValidUuid(tenantId)) {
+            throw new InvalidTenantException(tenantId);
+        }
+        return UUID.fromString(tenantId).toString();
     }
 
     private static boolean isValidUuid(String value) {

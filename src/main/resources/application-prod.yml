@@ -21,6 +21,11 @@ spring:
 server:
   port: ${SERVER_PORT:8080}
 
+saas:
+  security:
+    jwt:
+      secret: ${JWT_SECRET}
+
 management:
   tracing:
     sampling:

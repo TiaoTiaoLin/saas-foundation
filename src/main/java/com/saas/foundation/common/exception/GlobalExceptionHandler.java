@@ -13,6 +13,7 @@ import org.springframework.web.server.ResponseStatusException;
 import com.saas.foundation.ratelimit.RateLimitExceededException;
 import com.saas.foundation.tenant.exception.InvalidTenantException;
 import com.saas.foundation.tenant.exception.MissingTenantException;
+import com.saas.foundation.tenant.exception.TenantAccessDeniedException;
 
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
@@ -43,6 +44,12 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(InvalidTenantException.class)
     public ResponseEntity<ApiError> handleInvalidTenant(InvalidTenantException ex, HttpServletRequest request) {
         return build(HttpStatus.BAD_REQUEST, ex.getMessage(), request.getRequestURI());
+    }
+
+    @ExceptionHandler(TenantAccessDeniedException.class)
+    public ResponseEntity<ApiError> handleTenantAccessDenied(TenantAccessDeniedException ex,
+                                                             HttpServletRequest request) {
+        return build(HttpStatus.FORBIDDEN, ex.getMessage(), request.getRequestURI());
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
