@@ -139,6 +139,10 @@ resilience4j:
           - java.io.IOException
 
 saas:
+  cors:
+    allowed-origins:
+      - http://localhost:5173
+      - http://127.0.0.1:5173
   tenancy:
     header-name: X-Tenant-ID
     active-cache-key-prefix: "tenant:active:"
