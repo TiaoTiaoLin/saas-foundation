@@ -37,6 +37,25 @@ public class ProductService {
     }
 
     /**
+     * @param includeInactive owners and admins also match products that have been turned off
+     */
+    @Transactional(readOnly = true)
+    public List<ProductResponse> search(String query, boolean includeInactive) {
+        String trimmed = query == null ? "" : query.trim();
+        if (trimmed.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Search text is required");
+        }
+        if (trimmed.length() > 128) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Search text must be at most 128 characters");
+        }
+        String pattern = likePattern(trimmed);
+        List<Product> products = includeInactive
+                ? productRepository.search(pattern)
+                : productRepository.searchActive(pattern);
+        return products.stream().map(ProductResponse::from).toList();
+    }
+
+    /**
      * @param includeInactive owners and admins can load a product that has been turned off;
      *                        members receive the same not-found response as for a missing id
      */
@@ -77,5 +96,14 @@ public class ProductService {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Product not found");
         }
         productRepository.deleteById(id);
+    }
+
+    /** Wraps {@code query} as a LIKE pattern, treating {@code %}, {@code _} and {@code \} as literals. */
+    static String likePattern(String query) {
+        String escaped = query
+                .replace("\\", "\\\\")
+                .replace("%", "\\%")
+                .replace("_", "\\_");
+        return "%" + escaped + "%";
     }
 }

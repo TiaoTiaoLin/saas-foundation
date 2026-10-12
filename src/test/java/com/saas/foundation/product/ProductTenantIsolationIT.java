@@ -283,6 +283,54 @@ class ProductTenantIsolationIT {
     }
 
     @Test
+    void searchMatchesNameOrSkuInsideTheCurrentTenant() throws Exception {
+        String token = UUID.randomUUID().toString().substring(0, 8);
+        createProduct(TENANT_C, "Bolt " + token, "OTHER-" + token);
+        createProduct(TENANT_C, "Unrelated", "SKU-" + token);
+        createProduct(TENANT_C, "Hidden " + token, "OFF-" + token);
+        String hiddenId = productId(TENANT_C, "OFF-" + token);
+        mockMvc.perform(put("/api/v1/products/" + hiddenId)
+                        .header(HttpHeaders.AUTHORIZATION, bearer(TENANT_C))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"active":false}
+                                """))
+                .andExpect(status().isOk());
+        createProduct(TENANT_B, "Bolt " + token, "FOREIGN-" + token);
+
+        mockMvc.perform(get("/api/v1/products/search")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(TENANT_C))
+                        .param("q", token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(3))
+                .andExpect(jsonPath("$[0].sku").value("OTHER-" + token))
+                .andExpect(jsonPath("$[1].sku").value("OFF-" + token))
+                .andExpect(jsonPath("$[2].sku").value("SKU-" + token));
+
+        mockMvc.perform(get("/api/v1/products/search")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(TENANT_C, "MEMBER"))
+                        .param("q", " " + token.toUpperCase() + " "))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[0].sku").value("OTHER-" + token))
+                .andExpect(jsonPath("$[1].sku").value("SKU-" + token));
+
+        mockMvc.perform(get("/api/v1/products/search")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(TENANT_A))
+                        .param("q", token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(0));
+
+        mockMvc.perform(get("/api/v1/products/search")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(TENANT_C))
+                        .param("q", "   "))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(get("/api/v1/products/search")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(TENANT_C)))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
     void adminCanCreateProduct() throws Exception {
         mockMvc.perform(post("/api/v1/products")
                         .header(HttpHeaders.AUTHORIZATION, bearer(TENANT_A, "ADMIN"))
@@ -300,6 +348,27 @@ class ProductTenantIsolationIT {
                         .with(jwt())
                         .header("X-Tenant-ID", TENANT_C))
                 .andExpect(status().isForbidden());
+    }
+
+    private void createProduct(String tenantId, String name, String sku) throws Exception {
+        mockMvc.perform(post("/api/v1/products")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(tenantId))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name":"%s","sku":"%s"}
+                                """.formatted(name, sku)))
+                .andExpect(status().isCreated());
+    }
+
+    private String productId(String tenantId, String sku) throws Exception {
+        MvcResult result = mockMvc.perform(get("/api/v1/products/search")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(tenantId))
+                        .param("q", sku))
+                .andExpect(status().isOk())
+                .andReturn();
+        JsonNode products = objectMapper.readTree(result.getResponse().getContentAsString());
+        assertThat(products).hasSize(1);
+        return products.get(0).get("id").asText();
     }
 
     private String bearer(String tenantId) {

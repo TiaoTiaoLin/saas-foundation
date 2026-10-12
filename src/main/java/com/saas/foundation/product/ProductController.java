@@ -17,6 +17,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -42,6 +43,12 @@ public class ProductController {
             return productService.listAll();
         }
         return productService.listActive();
+    }
+
+    @GetMapping("/search")
+    @PreAuthorize("hasAnyRole('OWNER', 'ADMIN', 'MEMBER')")
+    public List<ProductResponse> search(@RequestParam(required = false) String q) {
+        return productService.search(q, canManageProducts());
     }
 
     @GetMapping("/{id}")
