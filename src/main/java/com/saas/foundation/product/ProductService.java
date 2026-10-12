@@ -23,15 +23,27 @@ public class ProductService {
     private final ProductRepository productRepository;
 
     @Transactional(readOnly = true)
+    public List<ProductResponse> listAll() {
+        return productRepository.findAll().stream()
+                .map(ProductResponse::from)
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
     public List<ProductResponse> listActive() {
         return productRepository.findByActiveTrue().stream()
                 .map(ProductResponse::from)
                 .toList();
     }
 
+    /**
+     * @param includeInactive owners and admins can load a product that has been turned off;
+     *                        members receive the same not-found response as for a missing id
+     */
     @Transactional(readOnly = true)
-    public ProductResponse getById(UUID id) {
+    public ProductResponse getById(UUID id, boolean includeInactive) {
         return productRepository.findById(id)
+                .filter(product -> includeInactive || product.isActive())
                 .map(ProductResponse::from)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Product not found"));
     }

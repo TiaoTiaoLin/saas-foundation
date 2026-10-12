@@ -10,6 +10,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -248,6 +250,39 @@ class ProductTenantIsolationIT {
     }
 
     @Test
+    void managersSeeInactiveProductsThatMembersDoNot() throws Exception {
+        MvcResult created = mockMvc.perform(post("/api/v1/products")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(TENANT_A))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name":"Retired","sku":"INACTIVE-1"}
+                                """))
+                .andExpect(status().isCreated())
+                .andReturn();
+        String productId = objectMapper.readTree(created.getResponse().getContentAsString()).get("id").asText();
+
+        mockMvc.perform(put("/api/v1/products/" + productId)
+                        .header(HttpHeaders.AUTHORIZATION, bearer(TENANT_A))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"active":false}
+                                """))
+                .andExpect(status().isOk());
+
+        assertThat(skus(bearer(TENANT_A))).contains("INACTIVE-1");
+        assertThat(skus(bearer(TENANT_A, "ADMIN"))).contains("INACTIVE-1");
+        assertThat(skus(bearer(TENANT_A, "MEMBER"))).doesNotContain("INACTIVE-1");
+
+        mockMvc.perform(get("/api/v1/products/" + productId)
+                        .header(HttpHeaders.AUTHORIZATION, bearer(TENANT_A, "MEMBER")))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(get("/api/v1/products/" + productId)
+                        .header(HttpHeaders.AUTHORIZATION, bearer(TENANT_A, "ADMIN")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.active").value(false));
+    }
+
+    @Test
     void adminCanCreateProduct() throws Exception {
         mockMvc.perform(post("/api/v1/products")
                         .header(HttpHeaders.AUTHORIZATION, bearer(TENANT_A, "ADMIN"))
@@ -273,5 +308,16 @@ class ProductTenantIsolationIT {
 
     private String bearer(String tenantId, String role) {
         return TestTokens.bearer(tokenService, tenantId, role);
+    }
+
+    private List<String> skus(String authorization) throws Exception {
+        MvcResult result = mockMvc.perform(get("/api/v1/products")
+                        .header(HttpHeaders.AUTHORIZATION, authorization))
+                .andExpect(status().isOk())
+                .andReturn();
+        JsonNode products = objectMapper.readTree(result.getResponse().getContentAsString());
+        List<String> skus = new ArrayList<>();
+        products.forEach(product -> skus.add(product.get("sku").asText()));
+        return skus;
     }
 }

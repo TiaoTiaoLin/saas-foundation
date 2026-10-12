@@ -6,6 +6,9 @@ import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -35,13 +38,16 @@ public class ProductController {
     @GetMapping
     @PreAuthorize("hasAnyRole('OWNER', 'ADMIN', 'MEMBER')")
     public List<ProductResponse> list() {
+        if (canManageProducts()) {
+            return productService.listAll();
+        }
         return productService.listActive();
     }
 
     @GetMapping("/{id}")
     @PreAuthorize("hasAnyRole('OWNER', 'ADMIN', 'MEMBER')")
     public ProductResponse get(@PathVariable UUID id) {
-        return productService.getById(id);
+        return productService.getById(id, canManageProducts());
     }
 
     @PostMapping
@@ -62,5 +68,20 @@ public class ProductController {
     @PreAuthorize("hasAnyRole('OWNER', 'ADMIN')")
     public void delete(@PathVariable UUID id) {
         productService.delete(id);
+    }
+
+    /** Owners and admins manage the catalog, including products that are turned off. */
+    private static boolean canManageProducts() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null) {
+            return false;
+        }
+        for (GrantedAuthority authority : authentication.getAuthorities()) {
+            String role = authority.getAuthority();
+            if ("ROLE_OWNER".equals(role) || "ROLE_ADMIN".equals(role)) {
+                return true;
+            }
+        }
+        return false;
     }
 }
