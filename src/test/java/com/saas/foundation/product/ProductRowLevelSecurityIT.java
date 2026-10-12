@@ -66,6 +66,8 @@ class ProductRowLevelSecurityIT {
     void tenantOnlySeesItsOwnRows() throws SQLException {
         UUID tenantA = UUID.randomUUID();
         UUID tenantB = UUID.randomUUID();
+        insertTenant(tenantA);
+        insertTenant(tenantB);
 
         inTenantTransaction(tenantA, c -> insertProduct(c, tenantA, "A-1"));
         inTenantTransaction(tenantB, c -> insertProduct(c, tenantB, "B-1"));
@@ -82,6 +84,7 @@ class ProductRowLevelSecurityIT {
     @Test
     void noRowsVisibleWithoutTenantContext() throws SQLException {
         UUID tenant = UUID.randomUUID();
+        insertTenant(tenant);
         inTenantTransaction(tenant, c -> insertProduct(c, tenant, "X-1"));
 
         int visibleWithoutTenant = inTenantTransaction(null, ProductRowLevelSecurityIT::countProducts);
@@ -90,9 +93,11 @@ class ProductRowLevelSecurityIT {
     }
 
     @Test
-    void insertForAnotherTenantIsRejected() {
+    void insertForAnotherTenantIsRejected() throws SQLException {
         UUID activeTenant = UUID.randomUUID();
         UUID otherTenant = UUID.randomUUID();
+        insertTenant(activeTenant);
+        insertTenant(otherTenant);
 
         assertThatThrownBy(() -> inTenantTransaction(activeTenant, c -> insertProduct(c, otherTenant, "EVIL-1")))
                 .isInstanceOf(SQLException.class)
@@ -103,6 +108,8 @@ class ProductRowLevelSecurityIT {
     void updateCannotReachAnotherTenantsRows() throws SQLException {
         UUID tenantA = UUID.randomUUID();
         UUID tenantB = UUID.randomUUID();
+        insertTenant(tenantA);
+        insertTenant(tenantB);
         inTenantTransaction(tenantA, c -> insertProduct(c, tenantA, "A-UPD"));
 
         int updated = inTenantTransaction(tenantB, c -> {
@@ -139,6 +146,18 @@ class ProductRowLevelSecurityIT {
                 connection.rollback();
                 throw e;
             }
+        }
+    }
+
+    private void insertTenant(UUID tenantId) throws SQLException {
+        try (Connection connection = dataSource.getConnection();
+             PreparedStatement ps = connection.prepareStatement("""
+                     INSERT INTO tenants (id, name, status, created_at, updated_at, version)
+                     VALUES (?, ?, 'ACTIVE', now(), now(), 0)
+                     """)) {
+            ps.setObject(1, tenantId);
+            ps.setString(2, "Tenant " + tenantId);
+            ps.executeUpdate();
         }
     }
 

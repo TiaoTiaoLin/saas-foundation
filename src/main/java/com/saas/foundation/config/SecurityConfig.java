@@ -20,8 +20,8 @@ import com.saas.foundation.security.JwtTokenService;
 /**
  * Stateless API security: requests authenticate with a Bearer access token issued by
  * {@link JwtTokenService}. Only signup, login/refresh/logout and public actuator endpoints are open.
- * Under the {@code local} profile, unauthenticated requests are still allowed so the API
- * can be exercised manually with only the tenant header.
+ * Under the {@code local} profile the filter chain still permits requests that have no
+ * token. Product methods require a role from the access token on every profile.
  */
 @Configuration
 @EnableWebSecurity

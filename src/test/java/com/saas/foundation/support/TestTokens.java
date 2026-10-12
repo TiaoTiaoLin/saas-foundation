@@ -15,8 +15,12 @@ public final class TestTokens {
     }
 
     public static String bearer(JwtTokenService tokenService, String tenantId) {
+        return bearer(tokenService, tenantId, "OWNER");
+    }
+
+    public static String bearer(JwtTokenService tokenService, String tenantId, String role) {
         String token = tokenService.issueAccessToken(
-                UUID.randomUUID(), UUID.fromString(tenantId), List.of("OWNER")).value();
+                UUID.randomUUID(), UUID.fromString(tenantId), List.of(role)).value();
         return "Bearer " + token;
     }
 }

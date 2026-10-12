@@ -2,8 +2,10 @@ package com.saas.foundation.product;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -208,6 +210,55 @@ class ProductTenantIsolationIT {
     }
 
     @Test
+    void memberCanReadProductsButCannotChangeThem() throws Exception {
+        MvcResult created = mockMvc.perform(post("/api/v1/products")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(TENANT_A))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name":"Owned","sku":"ROLE-1"}
+                                """))
+                .andExpect(status().isCreated())
+                .andReturn();
+        String productId = objectMapper.readTree(created.getResponse().getContentAsString()).get("id").asText();
+
+        mockMvc.perform(get("/api/v1/products")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(TENANT_A, "MEMBER")))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/products/" + productId)
+                        .header(HttpHeaders.AUTHORIZATION, bearer(TENANT_A, "MEMBER")))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/v1/products")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(TENANT_A, "MEMBER"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name":"Nope","sku":"ROLE-2"}
+                                """))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(put("/api/v1/products/" + productId)
+                        .header(HttpHeaders.AUTHORIZATION, bearer(TENANT_A, "MEMBER"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name":"Renamed"}
+                                """))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(delete("/api/v1/products/" + productId)
+                        .header(HttpHeaders.AUTHORIZATION, bearer(TENANT_A, "MEMBER")))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void adminCanCreateProduct() throws Exception {
+        mockMvc.perform(post("/api/v1/products")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(TENANT_A, "ADMIN"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name":"Admin widget","sku":"ROLE-ADMIN"}
+                                """))
+                .andExpect(status().isCreated());
+    }
+
+    @Test
     void tokenWithoutTenantIsRejected() throws Exception {
         // JwtTokenService always sets a tenant, so a mock JWT stands in for a token without one.
         mockMvc.perform(get("/api/v1/products")
@@ -218,5 +269,9 @@ class ProductTenantIsolationIT {
 
     private String bearer(String tenantId) {
         return TestTokens.bearer(tokenService, tenantId);
+    }
+
+    private String bearer(String tenantId, String role) {
+        return TestTokens.bearer(tokenService, tenantId, role);
     }
 }
