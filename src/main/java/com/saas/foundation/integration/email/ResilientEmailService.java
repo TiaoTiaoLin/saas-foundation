@@ -35,10 +35,28 @@ public class ResilientEmailService {
         return emailProviderClient.send(message);
     }
 
+    @CircuitBreaker(name = RESILIENCE_NAME, fallbackMethod = "sendInviteFallback")
+    @Retry(name = RESILIENCE_NAME)
+    public EmailSendResult sendMembershipInvite(String tenantId, String recipientEmail, String role) {
+        EmailMessage message = new EmailMessage(
+                recipientEmail,
+                "You were added to a tenant",
+                "You were added to tenant " + tenantId + " as " + role + "."
+        );
+        return emailProviderClient.send(message);
+    }
+
     @SuppressWarnings("unused")
     private EmailSendResult sendFallback(String tenantId, String recipientEmail, Throwable cause) {
         log.error("Email fallback engaged tenantId={} to={} cause={}",
                 tenantId, recipientEmail, cause.toString());
+        return EmailSendResult.fallback("queued-for-retry:" + cause.getClass().getSimpleName());
+    }
+
+    @SuppressWarnings("unused")
+    private EmailSendResult sendInviteFallback(String tenantId, String recipientEmail, String role, Throwable cause) {
+        log.error("Invite email fallback engaged tenantId={} to={} role={} cause={}",
+                tenantId, recipientEmail, role, cause.toString());
         return EmailSendResult.fallback("queued-for-retry:" + cause.getClass().getSimpleName());
     }
 }
