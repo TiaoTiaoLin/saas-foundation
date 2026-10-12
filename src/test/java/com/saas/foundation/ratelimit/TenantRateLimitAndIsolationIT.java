@@ -6,11 +6,14 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.util.List;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
@@ -69,10 +72,19 @@ class TenantRateLimitAndIsolationIT {
     @Autowired
     TenantRepository tenantRepository;
 
+    @Autowired
+    StringRedisTemplate redis;
+
+    @Autowired
+    RateLimitProperties rateLimitProperties;
+
     @BeforeEach
     void seedTenants() {
         TestTenants.ensure(tenantRepository, TENANT_A, TenantStatus.ACTIVE);
         TestTenants.ensure(tenantRepository, TENANT_B, TenantStatus.ACTIVE);
+        redis.delete(List.of(
+                rateLimitProperties.keyPrefix() + TENANT_A,
+                rateLimitProperties.keyPrefix() + TENANT_B));
     }
 
     @Test

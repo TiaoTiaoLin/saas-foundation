@@ -113,6 +113,8 @@ management:
 
 resilience4j:
   circuitbreaker:
+    # Lower order is the outer aspect, so retries finish before this fallback runs.
+    circuit-breaker-aspect-order: 1
     instances:
       emailProvider:
         registerHealthIndicator: true
@@ -128,6 +130,8 @@ resilience4j:
           - java.io.IOException
           - org.springframework.web.client.ResourceAccessException
   retry:
+    # Inner aspect. Must stay above the circuit-breaker order.
+    retry-aspect-order: 2
     instances:
       emailProvider:
         maxAttempts: 3

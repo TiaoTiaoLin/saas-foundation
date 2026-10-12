@@ -296,7 +296,9 @@ class ProductTenantIsolationIT {
                                 {"active":false}
                                 """))
                 .andExpect(status().isOk());
-        createProduct(TENANT_B, "Bolt " + token, "FOREIGN-" + token);
+        String otherTenant = "abababab-abab-4aba-8aba-abababababab";
+        TestTenants.ensure(tenantRepository, otherTenant, TenantStatus.ACTIVE);
+        createProduct(otherTenant, "Bolt " + token, "FOREIGN-" + token);
 
         mockMvc.perform(get("/api/v1/products/search")
                         .header(HttpHeaders.AUTHORIZATION, bearer(TENANT_C))

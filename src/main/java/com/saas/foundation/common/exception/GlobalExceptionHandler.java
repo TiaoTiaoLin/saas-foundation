@@ -4,6 +4,7 @@ import java.util.List;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -50,6 +51,12 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiError> handleTenantAccessDenied(TenantAccessDeniedException ex,
                                                              HttpServletRequest request) {
         return build(HttpStatus.FORBIDDEN, ex.getMessage(), request.getRequestURI());
+    }
+
+    @ExceptionHandler(AccessDeniedException.class)
+    public ResponseEntity<ApiError> handleAccessDenied(AccessDeniedException ex, HttpServletRequest request) {
+        log.debug("Access denied on {}: {}", request.getRequestURI(), ex.getMessage());
+        return build(HttpStatus.FORBIDDEN, "Access denied", request.getRequestURI());
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
