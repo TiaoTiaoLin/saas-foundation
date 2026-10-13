@@ -95,7 +95,7 @@ class TenantSignupIT {
 
         mockMvc.perform(get("/api/v1/products").header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(0));
+                .andExpect(jsonPath("$.items.length()").value(0));
     }
 
     @Test

@@ -137,7 +137,7 @@ class ProductTenantIsolationIT {
                 .andExpect(status().isOk())
                 .andReturn();
 
-        JsonNode aProducts = objectMapper.readTree(tenantAList.getResponse().getContentAsString());
+        JsonNode aProducts = objectMapper.readTree(tenantAList.getResponse().getContentAsString()).get("items");
         assertThat(aProducts).hasSize(1);
         assertThat(aProducts.get(0).get("sku").asText()).isEqualTo("W-A-1");
         assertThat(aProducts.get(0).get("tenantId").asText()).isEqualTo(TENANT_A);
@@ -147,7 +147,7 @@ class ProductTenantIsolationIT {
                 .andExpect(status().isOk())
                 .andReturn();
 
-        JsonNode bProducts = objectMapper.readTree(tenantBList.getResponse().getContentAsString());
+        JsonNode bProducts = objectMapper.readTree(tenantBList.getResponse().getContentAsString()).get("items");
         assertThat(bProducts).hasSize(1);
         assertThat(bProducts.get(0).get("sku").asText()).isEqualTo("W-B-1");
     }
@@ -304,24 +304,27 @@ class ProductTenantIsolationIT {
                         .header(HttpHeaders.AUTHORIZATION, bearer(TENANT_C))
                         .param("q", token))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(3))
-                .andExpect(jsonPath("$[0].sku").value("OTHER-" + token))
-                .andExpect(jsonPath("$[1].sku").value("OFF-" + token))
-                .andExpect(jsonPath("$[2].sku").value("SKU-" + token));
+                .andExpect(jsonPath("$.total").value(3))
+                .andExpect(jsonPath("$.items.length()").value(3))
+                .andExpect(jsonPath("$.items[0].sku").value("OTHER-" + token))
+                .andExpect(jsonPath("$.items[1].sku").value("OFF-" + token))
+                .andExpect(jsonPath("$.items[2].sku").value("SKU-" + token));
 
         mockMvc.perform(get("/api/v1/products/search")
                         .header(HttpHeaders.AUTHORIZATION, bearer(TENANT_C, "MEMBER"))
                         .param("q", " " + token.toUpperCase() + " "))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(2))
-                .andExpect(jsonPath("$[0].sku").value("OTHER-" + token))
-                .andExpect(jsonPath("$[1].sku").value("SKU-" + token));
+                .andExpect(jsonPath("$.total").value(2))
+                .andExpect(jsonPath("$.items.length()").value(2))
+                .andExpect(jsonPath("$.items[0].sku").value("OTHER-" + token))
+                .andExpect(jsonPath("$.items[1].sku").value("SKU-" + token));
 
         mockMvc.perform(get("/api/v1/products/search")
                         .header(HttpHeaders.AUTHORIZATION, bearer(TENANT_A))
                         .param("q", token))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(0));
+                .andExpect(jsonPath("$.items.length()").value(0))
+                .andExpect(jsonPath("$.total").value(0));
 
         mockMvc.perform(get("/api/v1/products/search")
                         .header(HttpHeaders.AUTHORIZATION, bearer(TENANT_C))
@@ -330,6 +333,40 @@ class ProductTenantIsolationIT {
         mockMvc.perform(get("/api/v1/products/search")
                         .header(HttpHeaders.AUTHORIZATION, bearer(TENANT_C)))
                 .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void productsAreReturnedOnePageAtATime() throws Exception {
+        String tenantId = UUID.randomUUID().toString();
+        TestTenants.ensure(tenantRepository, tenantId, TenantStatus.ACTIVE);
+        createProduct(tenantId, "Alpha", "PAGE-A");
+        createProduct(tenantId, "Beta", "PAGE-B");
+
+        mockMvc.perform(get("/api/v1/products")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(tenantId))
+                        .param("page", "0")
+                        .param("size", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.page").value(0))
+                .andExpect(jsonPath("$.size").value(1))
+                .andExpect(jsonPath("$.total").value(2))
+                .andExpect(jsonPath("$.items.length()").value(1))
+                .andExpect(jsonPath("$.items[0].sku").value("PAGE-A"));
+
+        mockMvc.perform(get("/api/v1/products")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(tenantId))
+                        .param("page", "1")
+                        .param("size", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.page").value(1))
+                .andExpect(jsonPath("$.items[0].sku").value("PAGE-B"));
+
+        mockMvc.perform(get("/api/v1/products")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(tenantId))
+                        .param("size", "500"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.size").value(100))
+                .andExpect(jsonPath("$.items.length()").value(2));
     }
 
     @Test
@@ -368,7 +405,7 @@ class ProductTenantIsolationIT {
                         .param("q", sku))
                 .andExpect(status().isOk())
                 .andReturn();
-        JsonNode products = objectMapper.readTree(result.getResponse().getContentAsString());
+        JsonNode products = objectMapper.readTree(result.getResponse().getContentAsString()).get("items");
         assertThat(products).hasSize(1);
         return products.get(0).get("id").asText();
     }
@@ -386,7 +423,7 @@ class ProductTenantIsolationIT {
                         .header(HttpHeaders.AUTHORIZATION, authorization))
                 .andExpect(status().isOk())
                 .andReturn();
-        JsonNode products = objectMapper.readTree(result.getResponse().getContentAsString());
+        JsonNode products = objectMapper.readTree(result.getResponse().getContentAsString()).get("items");
         List<String> skus = new ArrayList<>();
         products.forEach(product -> skus.add(product.get("sku").asText()));
         return skus;

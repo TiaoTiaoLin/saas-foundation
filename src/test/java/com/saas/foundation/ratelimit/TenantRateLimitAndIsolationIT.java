@@ -109,7 +109,7 @@ class TenantRateLimitAndIsolationIT {
                         .header(HttpHeaders.AUTHORIZATION, bearer(TENANT_A)))
                 .andExpect(status().isOk())
                 .andReturn();
-        JsonNode aProducts = objectMapper.readTree(aList.getResponse().getContentAsString());
+        JsonNode aProducts = objectMapper.readTree(aList.getResponse().getContentAsString()).get("items");
         assertThat(aProducts).hasSize(1);
         assertThat(aProducts.get(0).get("sku").asText()).isEqualTo("ISO-A");
 
@@ -117,7 +117,7 @@ class TenantRateLimitAndIsolationIT {
                         .header(HttpHeaders.AUTHORIZATION, bearer(TENANT_B)))
                 .andExpect(status().isOk())
                 .andReturn();
-        JsonNode bProducts = objectMapper.readTree(bList.getResponse().getContentAsString());
+        JsonNode bProducts = objectMapper.readTree(bList.getResponse().getContentAsString()).get("items");
         assertThat(bProducts).hasSize(1);
         assertThat(bProducts.get(0).get("sku").asText()).isEqualTo("ISO-B");
     }

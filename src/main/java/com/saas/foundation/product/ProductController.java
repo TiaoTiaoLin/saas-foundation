@@ -1,8 +1,9 @@
 package com.saas.foundation.product;
 
-import java.util.List;
 import java.util.UUID;
 
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -22,6 +23,7 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.saas.foundation.product.dto.CreateProductRequest;
+import com.saas.foundation.product.dto.ProductPageResponse;
 import com.saas.foundation.product.dto.ProductResponse;
 import com.saas.foundation.product.dto.UpdateProductRequest;
 
@@ -38,17 +40,20 @@ public class ProductController {
 
     @GetMapping
     @PreAuthorize("hasAnyRole('OWNER', 'ADMIN', 'MEMBER')")
-    public List<ProductResponse> list() {
+    public ProductPageResponse list(
+            @PageableDefault(size = ProductService.DEFAULT_PAGE_SIZE) Pageable pageable) {
         if (canManageProducts()) {
-            return productService.listAll();
+            return productService.listAll(pageable);
         }
-        return productService.listActive();
+        return productService.listActive(pageable);
     }
 
     @GetMapping("/search")
     @PreAuthorize("hasAnyRole('OWNER', 'ADMIN', 'MEMBER')")
-    public List<ProductResponse> search(@RequestParam(required = false) String q) {
-        return productService.search(q, canManageProducts());
+    public ProductPageResponse search(
+            @RequestParam(required = false) String q,
+            @PageableDefault(size = ProductService.DEFAULT_PAGE_SIZE) Pageable pageable) {
+        return productService.search(q, canManageProducts(), pageable);
     }
 
     @GetMapping("/{id}")

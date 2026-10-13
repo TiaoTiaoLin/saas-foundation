@@ -100,8 +100,8 @@ class AuthLoginIT {
         mockMvc.perform(get("/api/v1/products")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(1))
-                .andExpect(jsonPath("$[0].sku").value("LOGIN-1"));
+                .andExpect(jsonPath("$.items.length()").value(1))
+                .andExpect(jsonPath("$.items[0].sku").value("LOGIN-1"));
     }
 
     @Test
