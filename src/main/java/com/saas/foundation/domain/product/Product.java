@@ -7,7 +7,6 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import lombok.Getter;
-import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 @Entity
@@ -20,7 +19,6 @@ import lombok.Setter;
 )
 @Getter
 @Setter
-@NoArgsConstructor
 public class Product extends TenantScopedEntity {
 
     @Column(nullable = false, length = 128)
@@ -31,6 +29,10 @@ public class Product extends TenantScopedEntity {
 
     @Column(nullable = false)
     private boolean active = true;
+
+    /** Required by JPA. */
+    public Product() {
+    }
 
     public Product(String name, String sku) {
         this.name = name;

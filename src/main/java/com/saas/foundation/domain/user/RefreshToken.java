@@ -12,7 +12,6 @@ import jakarta.persistence.Id;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 import lombok.Getter;
-import lombok.NoArgsConstructor;
 
 /**
  * A refresh token session entry. Only the SHA-256 hash of the token is stored.
@@ -21,7 +20,6 @@ import lombok.NoArgsConstructor;
 @Entity
 @Table(name = "refresh_tokens")
 @Getter
-@NoArgsConstructor
 public class RefreshToken {
 
     @Id
@@ -49,6 +47,10 @@ public class RefreshToken {
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
+
+    /** Required by JPA. */
+    public RefreshToken() {
+    }
 
     public RefreshToken(UUID tenantId, UUID userId, String tokenHash, Instant expiresAt) {
         this.tenantId = tenantId;

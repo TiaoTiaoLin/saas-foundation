@@ -9,7 +9,6 @@ import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Table;
 import lombok.Getter;
-import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 @Entity
@@ -17,7 +16,6 @@ import lombok.Setter;
 @EntityListeners(TenantPersistenceListener.class)
 @Getter
 @Setter
-@NoArgsConstructor
 public class Tenant extends AuditedEntity {
 
     @Column(nullable = false, length = 128)
@@ -26,6 +24,10 @@ public class Tenant extends AuditedEntity {
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 16)
     private TenantStatus status = TenantStatus.ACTIVE;
+
+    /** Required by JPA. */
+    public Tenant() {
+    }
 
     public Tenant(String name) {
         this.name = name;

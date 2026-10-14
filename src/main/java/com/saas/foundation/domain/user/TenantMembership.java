@@ -11,7 +11,6 @@ import jakarta.persistence.Enumerated;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import lombok.Getter;
-import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 @Entity
@@ -24,7 +23,6 @@ import lombok.Setter;
 )
 @Getter
 @Setter
-@NoArgsConstructor
 public class TenantMembership extends AuditedEntity {
 
     @Column(name = "tenant_id", nullable = false, updatable = false)
@@ -36,6 +34,10 @@ public class TenantMembership extends AuditedEntity {
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 32)
     private MembershipRole role;
+
+    /** Required by JPA. */
+    public TenantMembership() {
+    }
 
     public TenantMembership(UUID tenantId, UUID userId, MembershipRole role) {
         this.tenantId = tenantId;
