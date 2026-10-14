@@ -7,15 +7,20 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 import com.saas.foundation.observability.TenantMetricsInterceptor;
 import com.saas.foundation.ratelimit.TenantRateLimitInterceptor;
 
-import lombok.RequiredArgsConstructor;
-
 @Configuration
-@RequiredArgsConstructor
 public class TenantWebMvcConfig implements WebMvcConfigurer {
 
     private final TenantInterceptor tenantInterceptor;
     private final TenantMetricsInterceptor tenantMetricsInterceptor;
     private final TenantRateLimitInterceptor tenantRateLimitInterceptor;
+
+    public TenantWebMvcConfig(TenantInterceptor tenantInterceptor,
+                              TenantMetricsInterceptor tenantMetricsInterceptor,
+                              TenantRateLimitInterceptor tenantRateLimitInterceptor) {
+        this.tenantInterceptor = tenantInterceptor;
+        this.tenantMetricsInterceptor = tenantMetricsInterceptor;
+        this.tenantRateLimitInterceptor = tenantRateLimitInterceptor;
+    }
 
     @Override
     public void addInterceptors(InterceptorRegistry registry) {

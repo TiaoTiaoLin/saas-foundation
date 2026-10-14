@@ -186,6 +186,12 @@ saas:
     refresh-per-ip:
       capacity: 60
       window: 1m
+    password-change-per-ip:
+      capacity: 20
+      window: 1m
+    password-change-per-user:
+      capacity: 5
+      window: 15m
   kafka:
     enabled: true
     tenant-registered-topic: tenant.registered

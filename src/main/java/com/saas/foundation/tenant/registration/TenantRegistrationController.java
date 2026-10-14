@@ -12,16 +12,20 @@ import com.saas.foundation.ratelimit.AuthRateLimiter;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
-import lombok.RequiredArgsConstructor;
 
 @Validated
 @RestController
 @RequestMapping("/api/v1/tenants")
-@RequiredArgsConstructor
 public class TenantRegistrationController {
 
     private final TenantRegistrationService tenantRegistrationService;
     private final AuthRateLimiter authRateLimiter;
+
+    public TenantRegistrationController(TenantRegistrationService tenantRegistrationService,
+                                        AuthRateLimiter authRateLimiter) {
+        this.tenantRegistrationService = tenantRegistrationService;
+        this.authRateLimiter = authRateLimiter;
+    }
 
     @PostMapping("/registrations")
     public ResponseEntity<RegisterTenantResponse> register(@Valid @RequestBody RegisterTenantRequest request,

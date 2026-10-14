@@ -20,7 +20,6 @@ import com.saas.foundation.tenant.exception.TenantAccessDeniedException;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -33,7 +32,6 @@ import lombok.extern.slf4j.Slf4j;
  */
 @Slf4j
 @Component
-@RequiredArgsConstructor
 public class TenantInterceptor implements HandlerInterceptor {
 
     private static final Pattern TENANT_ID_PATTERN = Pattern.compile(
@@ -43,6 +41,11 @@ public class TenantInterceptor implements HandlerInterceptor {
     private final TenancyProperties tenancyProperties;
     private final TenantResolver tenantResolver;
     private final AntPathMatcher pathMatcher = new AntPathMatcher();
+
+    public TenantInterceptor(TenancyProperties tenancyProperties, TenantResolver tenantResolver) {
+        this.tenancyProperties = tenancyProperties;
+        this.tenantResolver = tenantResolver;
+    }
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {

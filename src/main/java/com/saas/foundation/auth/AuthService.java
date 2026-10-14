@@ -29,6 +29,8 @@ import lombok.extern.slf4j.Slf4j;
 public class AuthService {
 
     static final String INVALID_CREDENTIALS = "Invalid email or password";
+    static final String CURRENT_PASSWORD_INCORRECT = "Current password is incorrect";
+    static final String PASSWORD_UNCHANGED = "Choose a different password";
 
     private final UserAccountRepository userAccountRepository;
     private final TenantMembershipRepository tenantMembershipRepository;
@@ -85,6 +87,43 @@ public class AuthService {
     @Transactional
     public void logout(String rawRefreshToken) {
         refreshTokenService.revoke(rawRefreshToken);
+    }
+
+    /**
+     * Replaces the account password and revokes every refresh token for this user.
+     * The returned session is the only one that can still refresh.
+     */
+    @Transactional
+    public TokenResponse changePassword(UUID userId, UUID tenantId, ChangePasswordRequest request) {
+        UserAccount user = userAccountRepository.findById(userId)
+                .filter(UserAccount::isEnabled)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Sign in again to continue."));
+        if (PasswordConfig.exceedsMaxPasswordBytes(request.currentPassword())
+                || !passwordEncoder.matches(request.currentPassword(), user.getPasswordHash())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, CURRENT_PASSWORD_INCORRECT);
+        }
+        if (request.newPassword().length() < 12) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Password must be at least 12 characters");
+        }
+        if (PasswordConfig.exceedsMaxPasswordBytes(request.newPassword())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Password must be at most " + PasswordConfig.MAX_PASSWORD_BYTES + " bytes");
+        }
+        if (request.currentPassword().equals(request.newPassword())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, PASSWORD_UNCHANGED);
+        }
+
+        TenantMembership membership = tenantMembershipRepository
+                .findByTenantIdAndUserId(tenantId, user.getId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.FORBIDDEN, "Not a member of this tenant"));
+        requireActiveTenant(tenantId);
+
+        user.setPasswordHash(passwordEncoder.encode(request.newPassword()));
+        refreshTokenService.revokeAllForUser(user.getId());
+
+        IssuedRefreshToken refreshToken = refreshTokenService.issue(user.getId(), membership.getTenantId());
+        log.info("Password changed userId={} tenantId={}", user.getId(), membership.getTenantId());
+        return tokenResponse(user, membership, refreshToken);
     }
 
     private TokenResponse tokenResponse(UserAccount user, TenantMembership membership,

@@ -18,10 +18,7 @@ import com.saas.foundation.product.dto.ProductPageResponse;
 import com.saas.foundation.product.dto.ProductResponse;
 import com.saas.foundation.product.dto.UpdateProductRequest;
 
-import lombok.RequiredArgsConstructor;
-
 @Service
-@RequiredArgsConstructor
 public class ProductService {
 
     public static final int DEFAULT_PAGE_SIZE = 20;
@@ -32,6 +29,10 @@ public class ProductService {
             Sort.Order.asc("sku").ignoreCase());
 
     private final ProductRepository productRepository;
+
+    public ProductService(ProductRepository productRepository) {
+        this.productRepository = productRepository;
+    }
 
     @Transactional(readOnly = true)
     public ProductPageResponse listAll(Pageable pageable) {

@@ -9,17 +9,21 @@ import org.springframework.stereotype.Component;
 
 import com.saas.foundation.messaging.event.TenantRegisteredEvent;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 @Component
-@RequiredArgsConstructor
 @ConditionalOnProperty(prefix = "saas.kafka", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class TenantEventPublisher {
 
     private final KafkaTemplate<String, TenantRegisteredEvent> tenantRegisteredKafkaTemplate;
     private final KafkaTopicsProperties topics;
+
+    public TenantEventPublisher(KafkaTemplate<String, TenantRegisteredEvent> tenantRegisteredKafkaTemplate,
+                                KafkaTopicsProperties topics) {
+        this.tenantRegisteredKafkaTemplate = tenantRegisteredKafkaTemplate;
+        this.topics = topics;
+    }
 
     /**
      * Publishes asynchronously; callers are not blocked on broker ACK beyond future completion hooks.

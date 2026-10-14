@@ -22,15 +22,17 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 import jakarta.validation.Valid;
-import lombok.RequiredArgsConstructor;
 
 @Validated
 @RestController
 @RequestMapping("/api/v1/members")
-@RequiredArgsConstructor
 public class MembershipController {
 
     private final MembershipService membershipService;
+
+    public MembershipController(MembershipService membershipService) {
+        this.membershipService = membershipService;
+    }
 
     @GetMapping
     @PreAuthorize("hasAnyRole('OWNER', 'ADMIN')")

@@ -28,15 +28,17 @@ import com.saas.foundation.product.dto.ProductResponse;
 import com.saas.foundation.product.dto.UpdateProductRequest;
 
 import jakarta.validation.Valid;
-import lombok.RequiredArgsConstructor;
 
 @Validated
 @RestController
 @RequestMapping("/api/v1/products")
-@RequiredArgsConstructor
 public class ProductController {
 
     private final ProductService productService;
+
+    public ProductController(ProductService productService) {
+        this.productService = productService;
+    }
 
     @GetMapping
     @PreAuthorize("hasAnyRole('OWNER', 'ADMIN', 'MEMBER')")

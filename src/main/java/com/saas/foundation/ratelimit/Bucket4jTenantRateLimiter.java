@@ -9,7 +9,6 @@ import io.github.bucket4j.BucketConfiguration;
 import io.github.bucket4j.ConsumptionProbe;
 import io.github.bucket4j.distributed.BucketProxy;
 import io.github.bucket4j.distributed.proxy.ProxyManager;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -18,12 +17,19 @@ import lombok.extern.slf4j.Slf4j;
  */
 @Slf4j
 @Component
-@RequiredArgsConstructor
 public class Bucket4jTenantRateLimiter implements TenantRateLimiter {
 
     private final ProxyManager<String> proxyManager;
     private final BucketConfiguration bucketConfiguration;
     private final RateLimitProperties properties;
+
+    public Bucket4jTenantRateLimiter(ProxyManager<String> proxyManager,
+                                     BucketConfiguration bucketConfiguration,
+                                     RateLimitProperties properties) {
+        this.proxyManager = proxyManager;
+        this.bucketConfiguration = bucketConfiguration;
+        this.properties = properties;
+    }
 
     @Override
     public void checkOrThrow(String tenantId) {

@@ -10,17 +10,19 @@ import org.springframework.stereotype.Component;
 import com.saas.foundation.integration.email.ResilientEmailService;
 import com.saas.foundation.messaging.event.TenantRegisteredEvent;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 @Component
-@RequiredArgsConstructor
 @ConditionalOnProperty(prefix = "saas.kafka", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class TenantRegisteredEventListener {
 
     private final ResilientEmailService resilientEmailService;
     private final AtomicLong processedCount = new AtomicLong();
+
+    public TenantRegisteredEventListener(ResilientEmailService resilientEmailService) {
+        this.resilientEmailService = resilientEmailService;
+    }
 
     @KafkaListener(
             topics = "${saas.kafka.tenant-registered-topic}",

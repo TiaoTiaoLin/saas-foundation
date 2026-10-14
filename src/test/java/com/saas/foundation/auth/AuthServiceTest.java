@@ -274,6 +274,45 @@ class AuthServiceTest {
         assertStatus(() -> authService.refresh(login.refreshToken()), HttpStatus.FORBIDDEN);
     }
 
+    @Test
+    void changePasswordReplacesTheHashAndRevokesEverySession() {
+        UUID tenantA = givenMembership(MembershipRole.OWNER, TenantStatus.ACTIVE);
+        UUID tenantB = givenAdditionalMembership(tenantA, MembershipRole.MEMBER);
+        TokenResponse sessionA = authService.login(new LoginRequest(EMAIL, PASSWORD, tenantA));
+        TokenResponse sessionB = authService.login(new LoginRequest(EMAIL, PASSWORD, tenantB));
+        String replacement = "a different passphrase";
+
+        TokenResponse changed = authService.changePassword(user.getId(), tenantA,
+                new ChangePasswordRequest(PASSWORD, replacement));
+
+        assertThat(passwordEncoder.matches(replacement, user.getPasswordHash())).isTrue();
+        assertThat(changed.tenantId()).isEqualTo(tenantA);
+        assertStatus(() -> authService.refresh(sessionA.refreshToken()), HttpStatus.UNAUTHORIZED);
+        assertStatus(() -> authService.refresh(sessionB.refreshToken()), HttpStatus.UNAUTHORIZED);
+        assertThat(authService.refresh(changed.refreshToken()).tenantId()).isEqualTo(tenantA);
+        assertThat(authService.login(new LoginRequest(EMAIL, replacement, tenantA)).tenantId()).isEqualTo(tenantA);
+        assertStatus(() -> authService.login(new LoginRequest(EMAIL, PASSWORD, tenantA)), HttpStatus.UNAUTHORIZED);
+    }
+
+    @Test
+    void changePasswordRejectsTheCurrentPasswordWhenItDoesNotMatch() {
+        UUID tenantId = givenMembership(MembershipRole.OWNER, TenantStatus.ACTIVE);
+        String hashBefore = user.getPasswordHash();
+
+        assertStatus(() -> authService.changePassword(user.getId(), tenantId,
+                new ChangePasswordRequest("not the current password", "a different passphrase")),
+                HttpStatus.BAD_REQUEST);
+        assertThat(user.getPasswordHash()).isEqualTo(hashBefore);
+    }
+
+    @Test
+    void changePasswordRejectsKeepingTheSamePassword() {
+        UUID tenantId = givenMembership(MembershipRole.OWNER, TenantStatus.ACTIVE);
+
+        assertStatus(() -> authService.changePassword(user.getId(), tenantId,
+                new ChangePasswordRequest(PASSWORD, PASSWORD)), HttpStatus.BAD_REQUEST);
+    }
+
     // ---- helpers ----
 
     private AuthService authServiceWithRefreshTtl(Duration refreshTtl) {
@@ -312,6 +351,18 @@ class AuthServiceTest {
             return token;
         });
         when(repository.findByTokenHash(any())).thenAnswer(inv -> Optional.ofNullable(byHash.get(inv.getArgument(0))));
+        when(repository.revokeAllActiveForUser(any(), any())).thenAnswer(inv -> {
+            UUID userId = inv.getArgument(0);
+            Instant now = inv.getArgument(1);
+            int revoked = 0;
+            for (RefreshToken token : byHash.values()) {
+                if (token.getUserId().equals(userId) && !token.isRevoked()) {
+                    token.revoke(now);
+                    revoked++;
+                }
+            }
+            return revoked;
+        });
         when(repository.revokeAllActive(any(), any(), any())).thenAnswer(inv -> {
             UUID userId = inv.getArgument(0);
             UUID tenantId = inv.getArgument(1);

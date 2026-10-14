@@ -21,7 +21,9 @@ public record AuthRateLimitProperties(
         @NotNull @Valid Limit loginPerIp,
         @NotNull @Valid Limit loginPerEmail,
         @NotNull @Valid Limit signupPerIp,
-        @NotNull @Valid Limit refreshPerIp
+        @NotNull @Valid Limit refreshPerIp,
+        @NotNull @Valid Limit passwordChangePerIp,
+        @NotNull @Valid Limit passwordChangePerUser
 ) {
 
     public record Limit(@Min(1) long capacity, @NotNull Duration window) {

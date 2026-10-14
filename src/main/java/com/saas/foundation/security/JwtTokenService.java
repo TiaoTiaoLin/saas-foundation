@@ -13,14 +13,11 @@ import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
 import org.springframework.stereotype.Service;
 
-import lombok.RequiredArgsConstructor;
-
 /**
  * Issues signed access tokens. The tenant is carried in the token so that
  * authenticated requests cannot choose their tenant via a request header.
  */
 @Service
-@RequiredArgsConstructor
 public class JwtTokenService {
 
     public static final String TENANT_ID_CLAIM = "tenant_id";
@@ -28,6 +25,11 @@ public class JwtTokenService {
 
     private final JwtEncoder jwtEncoder;
     private final JwtProperties properties;
+
+    public JwtTokenService(JwtEncoder jwtEncoder, JwtProperties properties) {
+        this.jwtEncoder = jwtEncoder;
+        this.properties = properties;
+    }
 
     public IssuedToken issueAccessToken(UUID userId, UUID tenantId, Collection<String> roles) {
         Instant issuedAt = Instant.now().truncatedTo(ChronoUnit.SECONDS);

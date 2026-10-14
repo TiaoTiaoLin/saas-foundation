@@ -14,7 +14,6 @@ import com.saas.foundation.domain.user.RefreshTokenRepository;
 import com.saas.foundation.security.Hashing;
 import com.saas.foundation.security.RefreshTokenProperties;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -23,7 +22,6 @@ import lombok.extern.slf4j.Slf4j;
  */
 @Slf4j
 @Component
-@RequiredArgsConstructor
 public class RefreshTokenService {
 
     static final String INVALID_REFRESH_TOKEN = "Invalid refresh token";
@@ -33,6 +31,11 @@ public class RefreshTokenService {
 
     private final RefreshTokenRepository refreshTokenRepository;
     private final RefreshTokenProperties properties;
+
+    public RefreshTokenService(RefreshTokenRepository refreshTokenRepository, RefreshTokenProperties properties) {
+        this.refreshTokenRepository = refreshTokenRepository;
+        this.properties = properties;
+    }
 
     public IssuedRefreshToken issue(UUID userId, UUID tenantId) {
         byte[] bytes = new byte[TOKEN_BYTES];
@@ -73,6 +76,11 @@ public class RefreshTokenService {
         IssuedRefreshToken next = issue(current.getUserId(), current.getTenantId());
         current.markReplaced(Instant.now(), next.id());
         return next;
+    }
+
+    /** Revokes every open session for the user, in every tenant. */
+    public void revokeAllForUser(UUID userId) {
+        refreshTokenRepository.revokeAllActiveForUser(userId, Instant.now());
     }
 
     /** Idempotent: unknown or already revoked tokens are ignored. */

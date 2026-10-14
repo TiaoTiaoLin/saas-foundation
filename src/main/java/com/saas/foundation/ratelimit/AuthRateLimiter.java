@@ -2,6 +2,7 @@ package com.saas.foundation.ratelimit;
 
 import java.util.Locale;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
@@ -14,7 +15,6 @@ import io.github.bucket4j.Bandwidth;
 import io.github.bucket4j.BucketConfiguration;
 import io.github.bucket4j.ConsumptionProbe;
 import io.github.bucket4j.distributed.proxy.ProxyManager;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -26,12 +26,16 @@ import lombok.extern.slf4j.Slf4j;
  */
 @Slf4j
 @Component
-@RequiredArgsConstructor
 public class AuthRateLimiter {
 
     private final ProxyManager<String> proxyManager;
     private final AuthRateLimitProperties properties;
     private final Map<Limit, BucketConfiguration> configurations = new ConcurrentHashMap<>();
+
+    public AuthRateLimiter(ProxyManager<String> proxyManager, AuthRateLimitProperties properties) {
+        this.proxyManager = proxyManager;
+        this.properties = properties;
+    }
 
     public void checkLogin(String clientIp, String email) {
         check("login:ip:" + clientIp, properties.loginPerIp());
@@ -44,6 +48,11 @@ public class AuthRateLimiter {
 
     public void checkRefresh(String clientIp) {
         check("refresh:ip:" + clientIp, properties.refreshPerIp());
+    }
+
+    public void checkPasswordChange(String clientIp, UUID userId) {
+        check("password:ip:" + clientIp, properties.passwordChangePerIp());
+        check("password:user:" + userId, properties.passwordChangePerUser());
     }
 
     private void check(String key, Limit limit) {

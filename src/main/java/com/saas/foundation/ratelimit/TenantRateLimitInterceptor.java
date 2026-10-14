@@ -9,19 +9,21 @@ import com.saas.foundation.tenant.TenantContext;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import lombok.RequiredArgsConstructor;
-
 /**
  * Runs after {@link com.saas.foundation.tenant.web.TenantInterceptor} and enforces
  * per-tenant quotas. Sets {@code X-RateLimit-Limit} / {@code Retry-After} on rejection via exception handler.
  */
 @Component
-@RequiredArgsConstructor
 public class TenantRateLimitInterceptor implements HandlerInterceptor, Ordered {
 
     private final TenantRateLimiter tenantRateLimiter;
     private final RateLimitProperties rateLimitProperties;
     private final AntPathMatcher pathMatcher = new AntPathMatcher();
+
+    public TenantRateLimitInterceptor(TenantRateLimiter tenantRateLimiter, RateLimitProperties rateLimitProperties) {
+        this.tenantRateLimiter = tenantRateLimiter;
+        this.rateLimitProperties = rateLimitProperties;
+    }
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {

@@ -10,13 +10,10 @@ import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import lombok.RequiredArgsConstructor;
-
 /**
  * Records {@code tenant.active.requests} and {@code api.latency} (p50/p95/p99) for tenant-bound requests.
  */
 @Component
-@RequiredArgsConstructor
 public class TenantMetricsInterceptor implements HandlerInterceptor, Ordered {
 
     static final String TIMER_SAMPLE_ATTR = TenantMetricsInterceptor.class.getName() + ".sample";
@@ -24,6 +21,11 @@ public class TenantMetricsInterceptor implements HandlerInterceptor, Ordered {
 
     private final TenantMetrics tenantMetrics;
     private final MeterRegistry meterRegistry;
+
+    public TenantMetricsInterceptor(TenantMetrics tenantMetrics, MeterRegistry meterRegistry) {
+        this.tenantMetrics = tenantMetrics;
+        this.meterRegistry = meterRegistry;
+    }
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {

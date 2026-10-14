@@ -22,6 +22,10 @@ public final class PostgresRedisContainers {
     private PostgresRedisContainers() {
     }
 
+    /**
+     * The returned container stays open. Callers close it, normally through {@code @Container}.
+     */
+    @SuppressWarnings("resource")
     public static PostgreSQLContainer<?> postgres() {
         return new PostgreSQLContainer<>(DockerImageName.parse("postgres:16-alpine"))
                 .withDatabaseName("saas_foundation")

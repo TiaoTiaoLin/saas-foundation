@@ -188,6 +188,32 @@ class AuthLoginIT {
                 .andExpect(status().isBadRequest());
     }
 
+    @Test
+    void changePasswordKeepsThisSessionAndRejectsThePreviousRefreshToken() throws Exception {
+        String email = uniqueEmail();
+        givenUserInNewTenant(email);
+        JsonNode login = loginTokens(email, PASSWORD);
+
+        MvcResult changed = mockMvc.perform(post("/api/v1/auth/password")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + login.get("accessToken").asText())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"currentPassword":"%s","newPassword":"a different passphrase"}
+                                """.formatted(PASSWORD)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.accessToken").isNotEmpty())
+                .andExpect(jsonPath("$.refreshToken").isNotEmpty())
+                .andReturn();
+        String newRefresh = objectMapper.readTree(changed.getResponse().getContentAsString())
+                .get("refreshToken").asText();
+
+        refresh(login.get("refreshToken").asText(), status().isUnauthorized());
+        refresh(newRefresh, status().isOk());
+
+        mockMvc.perform(loginRequest(email, "a different passphrase")).andExpect(status().isOk());
+        mockMvc.perform(loginRequest(email, PASSWORD)).andExpect(status().isUnauthorized());
+    }
+
     private UUID givenUserInNewTenant(String email) {
         Tenant tenant = tenantRepository.save(new Tenant("Tenant for " + email));
         UserAccount user = userAccountRepository.save(new UserAccount(email, passwordEncoder.encode(PASSWORD)));

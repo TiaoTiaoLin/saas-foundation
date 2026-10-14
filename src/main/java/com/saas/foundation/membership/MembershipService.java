@@ -24,10 +24,7 @@ import com.saas.foundation.integration.email.EmailSendResult;
 import com.saas.foundation.integration.email.ResilientEmailService;
 import com.saas.foundation.tenant.TenantContext;
 
-import lombok.RequiredArgsConstructor;
-
 @Service
-@RequiredArgsConstructor
 public class MembershipService {
 
     static final String OWNER_REQUIRED = "Owner role is required";
@@ -40,6 +37,16 @@ public class MembershipService {
     private final TenantMembershipRepository tenantMembershipRepository;
     private final RefreshTokenRepository refreshTokenRepository;
     private final ResilientEmailService resilientEmailService;
+
+    public MembershipService(UserAccountRepository userAccountRepository,
+                             TenantMembershipRepository tenantMembershipRepository,
+                             RefreshTokenRepository refreshTokenRepository,
+                             ResilientEmailService resilientEmailService) {
+        this.userAccountRepository = userAccountRepository;
+        this.tenantMembershipRepository = tenantMembershipRepository;
+        this.refreshTokenRepository = refreshTokenRepository;
+        this.resilientEmailService = resilientEmailService;
+    }
 
     @Transactional(readOnly = true)
     public List<MemberResponse> list(UUID callerId) {

@@ -1,7 +1,14 @@
 package com.saas.foundation.auth;
 
+import java.util.UUID;
+
 import org.springframework.http.HttpStatus;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.validation.annotation.Validated;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -9,19 +16,23 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.saas.foundation.ratelimit.AuthRateLimiter;
+import com.saas.foundation.security.JwtTokenService;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
-import lombok.RequiredArgsConstructor;
 
 @Validated
 @RestController
 @RequestMapping("/api/v1/auth")
-@RequiredArgsConstructor
 public class AuthController {
 
     private final AuthService authService;
     private final AuthRateLimiter authRateLimiter;
+
+    public AuthController(AuthService authService, AuthRateLimiter authRateLimiter) {
+        this.authService = authService;
+        this.authRateLimiter = authRateLimiter;
+    }
 
     @PostMapping("/login")
     public TokenResponse login(@Valid @RequestBody LoginRequest request, HttpServletRequest httpRequest) {
@@ -40,5 +51,27 @@ public class AuthController {
     public void logout(@Valid @RequestBody RefreshTokenRequest request, HttpServletRequest httpRequest) {
         authRateLimiter.checkRefresh(httpRequest.getRemoteAddr());
         authService.logout(request.refreshToken());
+    }
+
+    @PostMapping("/password")
+    @PreAuthorize("isAuthenticated()")
+    public TokenResponse changePassword(@Valid @RequestBody ChangePasswordRequest request,
+                                        HttpServletRequest httpRequest) {
+        JwtAuthenticationToken jwt = currentJwt();
+        UUID userId = UUID.fromString(jwt.getToken().getSubject());
+        authRateLimiter.checkPasswordChange(httpRequest.getRemoteAddr(), userId);
+        String tenantId = jwt.getToken().getClaimAsString(JwtTokenService.TENANT_ID_CLAIM);
+        if (tenantId == null || tenantId.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Sign in again to continue.");
+        }
+        return authService.changePassword(userId, UUID.fromString(tenantId), request);
+    }
+
+    private static JwtAuthenticationToken currentJwt() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication instanceof JwtAuthenticationToken jwt) {
+            return jwt;
+        }
+        throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Sign in again to continue.");
     }
 }

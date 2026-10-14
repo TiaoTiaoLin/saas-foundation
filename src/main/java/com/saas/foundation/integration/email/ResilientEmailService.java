@@ -4,7 +4,6 @@ import org.springframework.stereotype.Service;
 
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import io.github.resilience4j.retry.annotation.Retry;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -17,12 +16,15 @@ import lombok.extern.slf4j.Slf4j;
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class ResilientEmailService {
 
     public static final String RESILIENCE_NAME = "emailProvider";
 
     private final EmailProviderClient emailProviderClient;
+
+    public ResilientEmailService(EmailProviderClient emailProviderClient) {
+        this.emailProviderClient = emailProviderClient;
+    }
 
     @CircuitBreaker(name = RESILIENCE_NAME, fallbackMethod = "sendFallback")
     @Retry(name = RESILIENCE_NAME)
