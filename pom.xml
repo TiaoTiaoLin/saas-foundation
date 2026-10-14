@@ -22,6 +22,7 @@
         <lombok.version>1.18.48</lombok.version>
         <bucket4j.version>8.14.0</bucket4j.version>
         <resilience4j.version>2.2.0</resilience4j.version>
+        <resend.version>4.28.0</resend.version>
     </properties>
 
     <dependencies>
@@ -118,6 +119,13 @@
             <groupId>io.opentelemetry</groupId>
             <artifactId>opentelemetry-exporter-otlp</artifactId>
         </dependency> -->
+
+        <!-- Resend -->
+        <dependency>
+            <groupId>com.resend</groupId>
+            <artifactId>resend-java</artifactId>
+            <version>${resend.version}</version>
+        </dependency>
 
         <!-- Lombok -->
         <dependency>

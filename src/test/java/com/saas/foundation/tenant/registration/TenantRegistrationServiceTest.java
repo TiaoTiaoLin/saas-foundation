@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -12,6 +13,7 @@ import static org.mockito.Mockito.when;
 
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Consumer;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -33,16 +35,15 @@ import com.saas.foundation.domain.user.TenantMembership;
 import com.saas.foundation.domain.user.TenantMembershipRepository;
 import com.saas.foundation.domain.user.UserAccount;
 import com.saas.foundation.domain.user.UserAccountRepository;
-import com.saas.foundation.integration.email.EmailSendResult;
-import com.saas.foundation.integration.email.ResilientEmailService;
 import com.saas.foundation.messaging.TenantEventPublisher;
+import com.saas.foundation.messaging.event.TenantRegisteredEvent;
 
 class TenantRegistrationServiceTest {
 
     private static final String PASSWORD = "correct horse battery staple";
 
     private final PasswordEncoder passwordEncoder = new BCryptPasswordEncoder(4);
-    private final ResilientEmailService emailService = mock(ResilientEmailService.class);
+    private final TenantEventPublisher publisher = mock(TenantEventPublisher.class);
     private final TenantRepository tenants = mock(TenantRepository.class);
     private final UserAccountRepository users = mock(UserAccountRepository.class);
     private final TenantMembershipRepository memberships = mock(TenantMembershipRepository.class);
@@ -55,13 +56,17 @@ class TenantRegistrationServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new TenantRegistrationService(emailService, publisherProvider, tenants, users, memberships,
+        service = new TenantRegistrationService(publisherProvider, tenants, users, memberships,
                 passwordEncoder, transactionManager);
+        doAnswer(invocation -> {
+            Consumer<TenantEventPublisher> callback = invocation.getArgument(0);
+            callback.accept(publisher);
+            return null;
+        }).when(publisherProvider).ifAvailable(any());
         when(users.findByEmail(anyString())).thenReturn(Optional.empty());
         when(tenants.save(any(Tenant.class))).thenAnswer(inv -> withId(inv.getArgument(0)));
         when(users.save(any(UserAccount.class))).thenAnswer(inv -> withId(inv.getArgument(0)));
         when(memberships.save(any(TenantMembership.class))).thenAnswer(inv -> withId(inv.getArgument(0)));
-        when(emailService.sendWelcomeEmail(anyString(), anyString())).thenReturn(EmailSendResult.ok("msg-1"));
     }
 
     @Test
@@ -87,17 +92,17 @@ class TenantRegistrationServiceTest {
 
         assertThat(response.tenantId()).isEqualTo(tenant.getValue().getId().toString());
         assertThat(response.organizationName()).isEqualTo("Acme Corp");
-        assertThat(response.welcomeEmailAccepted()).isTrue();
+        assertThat(response.adminEmail()).isEqualTo("owner@acme.test");
     }
 
     @Test
-    void welcomeEmailIsSentAfterCommit() {
+    void registrationEventIsPublishedAfterCommit() {
         service.register(new RegisterTenantRequest("Acme", "owner@acme.test", PASSWORD));
 
-        InOrder order = inOrder(memberships, transactionManager, emailService);
+        InOrder order = inOrder(memberships, transactionManager, publisher);
         order.verify(memberships).save(any(TenantMembership.class));
         order.verify(transactionManager).commit(any());
-        order.verify(emailService).sendWelcomeEmail(anyString(), anyString());
+        order.verify(publisher).publishTenantRegistered(any(TenantRegisteredEvent.class));
     }
 
     @Test
@@ -110,7 +115,7 @@ class TenantRegistrationServiceTest {
 
         verify(tenants, never()).save(any());
         verify(users, never()).save(any());
-        verify(emailService, never()).sendWelcomeEmail(anyString(), anyString());
+        verify(publisher, never()).publishTenantRegistered(any());
     }
 
     @Test
@@ -119,7 +124,7 @@ class TenantRegistrationServiceTest {
 
         assertStatus(() -> service.register(new RegisterTenantRequest("Acme", "owner@acme.test", PASSWORD)),
                 HttpStatus.CONFLICT);
-        verify(emailService, never()).sendWelcomeEmail(anyString(), anyString());
+        verify(publisher, never()).publishTenantRegistered(any());
     }
 
     @Test

@@ -6,16 +6,18 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * Simulated third-party email provider. Injects transient failures so Resilience4j
- * retry / circuit-breaker behavior can be exercised in local and test environments.
+ * Test double for {@link EmailProviderClient}. Injects transient failures so Resilience4j
+ * retry and circuit-breaker behavior can be exercised without calling Resend.
  */
 @Slf4j
 @Component
+@Profile("test")
 public class SimulatedEmailProviderClient implements EmailProviderClient {
 
     private final AtomicInteger attempts = new AtomicInteger();

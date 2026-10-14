@@ -1,7 +1,7 @@
 package com.saas.foundation.integration.email;
 
 /**
- * Outbound email provider abstraction (SendGrid / SES / etc.).
+ * Outbound email provider. The application implementation sends through Resend.
  */
 public interface EmailProviderClient {
 

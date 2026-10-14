@@ -18,25 +18,20 @@ import com.saas.foundation.domain.user.TenantMembership;
 import com.saas.foundation.domain.user.TenantMembershipRepository;
 import com.saas.foundation.domain.user.UserAccount;
 import com.saas.foundation.domain.user.UserAccountRepository;
-import com.saas.foundation.integration.email.EmailSendResult;
-import com.saas.foundation.integration.email.ResilientEmailService;
 import com.saas.foundation.messaging.TenantEventPublisher;
 import com.saas.foundation.messaging.event.TenantRegisteredEvent;
 import com.saas.foundation.security.PasswordConfig;
 
-import lombok.extern.slf4j.Slf4j;
-
 /**
  * Signup: creates the tenant, its admin user and an {@link MembershipRole#OWNER} membership
- * in one transaction. The registration event and welcome email are sent only after commit.
+ * in one transaction, then publishes {@link TenantRegisteredEvent}. The welcome email is sent
+ * by the listener for that event.
  */
-@Slf4j
 @Service
 public class TenantRegistrationService {
 
     static final String EMAIL_TAKEN = "An account with this email already exists";
 
-    private final ResilientEmailService resilientEmailService;
     private final ObjectProvider<TenantEventPublisher> tenantEventPublisher;
     private final TenantRepository tenantRepository;
     private final UserAccountRepository userAccountRepository;
@@ -44,14 +39,12 @@ public class TenantRegistrationService {
     private final PasswordEncoder passwordEncoder;
     private final TransactionTemplate transactionTemplate;
 
-    public TenantRegistrationService(ResilientEmailService resilientEmailService,
-                                     ObjectProvider<TenantEventPublisher> tenantEventPublisher,
+    public TenantRegistrationService(ObjectProvider<TenantEventPublisher> tenantEventPublisher,
                                      TenantRepository tenantRepository,
                                      UserAccountRepository userAccountRepository,
                                      TenantMembershipRepository tenantMembershipRepository,
                                      PasswordEncoder passwordEncoder,
                                      PlatformTransactionManager transactionManager) {
-        this.resilientEmailService = resilientEmailService;
         this.tenantEventPublisher = tenantEventPublisher;
         this.tenantRepository = tenantRepository;
         this.userAccountRepository = userAccountRepository;
@@ -75,18 +68,7 @@ public class TenantRegistrationService {
         TenantRegisteredEvent event = TenantRegisteredEvent.of(tenantId, organizationName, adminEmail);
         tenantEventPublisher.ifAvailable(publisher -> publisher.publishTenantRegistered(event));
 
-        EmailSendResult emailResult = resilientEmailService.sendWelcomeEmail(tenantId, adminEmail);
-
-        log.info("Tenant registered tenantId={} adminUserId={} org={} emailAccepted={}",
-                tenantId, created.adminUserId(), organizationName, emailResult.success());
-
-        return new RegisterTenantResponse(
-                tenantId,
-                organizationName,
-                adminEmail,
-                emailResult.success(),
-                emailResult.detail()
-        );
+        return new RegisterTenantResponse(tenantId, organizationName, adminEmail);
     }
 
     private CreatedTenant createTenantWithOwner(String organizationName, String adminEmail, String passwordHash) {

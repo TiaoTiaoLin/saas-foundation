@@ -22,6 +22,10 @@ server:
   port: ${SERVER_PORT:8080}
 
 saas:
+  integrations:
+    email:
+      api-key: ${RESEND_API_KEY}
+      from: ${RESEND_FROM}
   security:
     jwt:
       secret: ${JWT_SECRET}

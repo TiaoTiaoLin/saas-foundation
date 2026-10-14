@@ -21,8 +21,7 @@ import com.saas.foundation.support.PostgresRedisContainers;
 
 @SpringBootTest(properties = {
         "saas.kafka.enabled=true",
-        "spring.kafka.listener.auto-startup=true",
-        "saas.integrations.email.simulated-failure-rate=0.0"
+        "spring.kafka.listener.auto-startup=true"
 })
 @EmbeddedKafka(partitions = 1, topics = {"tenant.registered"})
 @Testcontainers(disabledWithoutDocker = true)

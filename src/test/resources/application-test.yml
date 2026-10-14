@@ -9,6 +9,10 @@ spring:
 saas:
   kafka:
     enabled: false
+  integrations:
+    email:
+      api-key: test-api-key
+      from: "Test <test@example.com>"
   security:
     jwt:
       secret: test-only-jwt-secret-at-least-32-bytes-long
