@@ -18,6 +18,7 @@ import jakarta.persistence.LockModeType;
 public interface RefreshTokenRepository extends JpaRepository<RefreshToken, UUID> {
 
     /** Row-locked so two concurrent refreshes with the same token cannot both succeed. */
+    @Transactional
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     Optional<RefreshToken> findByTokenHash(String tokenHash);
 

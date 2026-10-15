@@ -20,6 +20,8 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.RequestBuilder;
@@ -96,6 +98,9 @@ class AuthLoginIT {
 
     @Autowired
     RefreshTokenRepository refreshTokenRepository;
+
+    @Autowired
+    PlatformTransactionManager transactionManager;
 
     @Test
     void loginTokenScopesProductRequestsToTheUsersTenant() throws Exception {
@@ -360,11 +365,18 @@ class AuthLoginIT {
     /**
      * Same read used before and after account deletion. An empty result only counts as
      * "deleted" when this query could see the row beforehand.
+     *
+     * <p>{@code findBySku} does not start a transaction, and PostgreSQL only applies
+     * {@code app.current_tenant} for the transaction that is already open. The tenant has to be
+     * bound before that transaction begins.
      */
     private boolean productVisible(UUID tenantId, String sku) {
         TenantContext.setTenantId(tenantId.toString());
         try {
-            return productRepository.findBySku(sku).isPresent();
+            TransactionTemplate reads = new TransactionTemplate(transactionManager);
+            reads.setReadOnly(true);
+            Boolean found = reads.execute(status -> productRepository.findBySku(sku).isPresent());
+            return Boolean.TRUE.equals(found);
         } finally {
             TenantContext.clear();
         }
