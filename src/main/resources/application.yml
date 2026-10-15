@@ -192,6 +192,12 @@ saas:
     password-change-per-user:
       capacity: 5
       window: 15m
+    password-reset-per-ip:
+      capacity: 5
+      window: 15m
+    password-reset-per-email:
+      capacity: 3
+      window: 1h
   kafka:
     enabled: true
     tenant-registered-topic: tenant.registered
@@ -205,6 +211,9 @@ saas:
       access-token-ttl: 15m
     refresh-token:
       ttl: 30d
+    password-reset:
+      ttl: 30m
+      app-base-url: ${APP_BASE_URL:http://localhost:5173}
 
 logging:
   level:

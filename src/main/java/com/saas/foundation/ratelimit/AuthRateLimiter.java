@@ -55,6 +55,16 @@ public class AuthRateLimiter {
         check("password:user:" + userId, properties.passwordChangePerUser());
     }
 
+    public void checkPasswordReset(String clientIp, String email) {
+        check("password-reset:ip:" + clientIp, properties.passwordResetPerIp());
+        check("password-reset:email:" + Hashing.sha256Hex(email.trim().toLowerCase(Locale.ROOT)),
+                properties.passwordResetPerEmail());
+    }
+
+    public void checkPasswordResetConfirm(String clientIp) {
+        check("password-reset-confirm:ip:" + clientIp, properties.passwordResetPerIp());
+    }
+
     private void check(String key, Limit limit) {
         if (!properties.enabled()) {
             return;

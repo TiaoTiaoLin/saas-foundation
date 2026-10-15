@@ -48,6 +48,23 @@ public class ResilientEmailService {
         return emailProviderClient.send(message);
     }
 
+    @CircuitBreaker(name = RESILIENCE_NAME, fallbackMethod = "sendResetFallback")
+    @Retry(name = RESILIENCE_NAME)
+    public EmailSendResult sendPasswordReset(String recipientEmail, String resetUrl) {
+        EmailMessage message = new EmailMessage(
+                recipientEmail,
+                "Reset your password",
+                """
+                Use this link to choose a new password. It expires soon.
+
+                %s
+
+                If you did not ask for this, you can ignore this email.
+                """.formatted(resetUrl)
+        );
+        return emailProviderClient.send(message);
+    }
+
     @SuppressWarnings("unused")
     private EmailSendResult sendFallback(String tenantId, String recipientEmail, Throwable cause) {
         log.error("Email fallback engaged tenantId={} to={} cause={}",
@@ -59,6 +76,12 @@ public class ResilientEmailService {
     private EmailSendResult sendInviteFallback(String tenantId, String recipientEmail, String role, Throwable cause) {
         log.error("Invite email fallback engaged tenantId={} to={} role={} cause={}",
                 tenantId, recipientEmail, role, cause.toString());
+        return EmailSendResult.fallback("queued-for-retry:" + cause.getClass().getSimpleName());
+    }
+
+    @SuppressWarnings("unused")
+    private EmailSendResult sendResetFallback(String recipientEmail, String resetUrl, Throwable cause) {
+        log.error("Password reset email fallback engaged to={} cause={}", recipientEmail, cause.toString());
         return EmailSendResult.fallback("queued-for-retry:" + cause.getClass().getSimpleName());
     }
 }

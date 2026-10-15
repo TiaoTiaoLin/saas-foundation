@@ -28,10 +28,14 @@ import jakarta.validation.Valid;
 public class AuthController {
 
     private final AuthService authService;
+    private final PasswordResetService passwordResetService;
     private final AuthRateLimiter authRateLimiter;
 
-    public AuthController(AuthService authService, AuthRateLimiter authRateLimiter) {
+    public AuthController(AuthService authService,
+                          PasswordResetService passwordResetService,
+                          AuthRateLimiter authRateLimiter) {
         this.authService = authService;
+        this.passwordResetService = passwordResetService;
         this.authRateLimiter = authRateLimiter;
     }
 
@@ -75,6 +79,22 @@ public class AuthController {
         UUID userId = UUID.fromString(currentJwt().getToken().getSubject());
         authRateLimiter.checkPasswordChange(httpRequest.getRemoteAddr(), userId);
         authService.deleteAccount(userId, request.currentPassword());
+    }
+
+    @PostMapping("/password-resets")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void requestPasswordReset(@Valid @RequestBody PasswordResetRequest request,
+                                     HttpServletRequest httpRequest) {
+        authRateLimiter.checkPasswordReset(httpRequest.getRemoteAddr(), request.email());
+        passwordResetService.requestReset(request.email());
+    }
+
+    @PostMapping("/password-resets/confirm")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void confirmPasswordReset(@Valid @RequestBody ConfirmPasswordResetRequest request,
+                                     HttpServletRequest httpRequest) {
+        authRateLimiter.checkPasswordResetConfirm(httpRequest.getRemoteAddr());
+        passwordResetService.confirmReset(request.token(), request.newPassword());
     }
 
     private static JwtAuthenticationToken currentJwt() {
