@@ -9,6 +9,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -65,6 +66,15 @@ public class AuthController {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Sign in again to continue.");
         }
         return authService.changePassword(userId, UUID.fromString(tenantId), request);
+    }
+
+    @DeleteMapping("/account")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    @PreAuthorize("isAuthenticated()")
+    public void deleteAccount(@Valid @RequestBody DeleteAccountRequest request, HttpServletRequest httpRequest) {
+        UUID userId = UUID.fromString(currentJwt().getToken().getSubject());
+        authRateLimiter.checkPasswordChange(httpRequest.getRemoteAddr(), userId);
+        authService.deleteAccount(userId, request.currentPassword());
     }
 
     private static JwtAuthenticationToken currentJwt() {

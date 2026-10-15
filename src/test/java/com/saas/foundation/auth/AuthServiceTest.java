@@ -3,7 +3,10 @@ package com.saas.foundation.auth;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.time.Duration;
@@ -16,6 +19,9 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.Query;
+
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -55,6 +61,7 @@ class AuthServiceTest {
     private final UserAccountRepository users = mock(UserAccountRepository.class);
     private final TenantMembershipRepository memberships = mock(TenantMembershipRepository.class);
     private final TenantRepository tenants = mock(TenantRepository.class);
+    private final EntityManager entityManager = mock(EntityManager.class);
     private final Map<String, RefreshToken> refreshTokensByHash = new ConcurrentHashMap<>();
     private final RefreshTokenRepository refreshTokens = inMemoryRefreshTokens(refreshTokensByHash);
 
@@ -64,6 +71,12 @@ class AuthServiceTest {
     @BeforeEach
     void setUp() {
         authService = authServiceWithRefreshTtl(Duration.ofDays(30));
+
+        Query query = mock(Query.class);
+        when(entityManager.createNativeQuery(anyString())).thenReturn(query);
+        when(query.setParameter(anyString(), any())).thenReturn(query);
+        when(query.getSingleResult()).thenReturn("ok");
+        when(query.executeUpdate()).thenReturn(0);
 
         user = withId(new UserAccount(EMAIL, passwordEncoder.encode(PASSWORD)));
         when(users.findByEmail(any())).thenAnswer(inv ->
@@ -313,13 +326,69 @@ class AuthServiceTest {
                 new ChangePasswordRequest(PASSWORD, PASSWORD)), HttpStatus.BAD_REQUEST);
     }
 
+    @Test
+    void deleteAccountRemovesASoleMemberTenantAndRevokesSessions() {
+        UUID tenantId = givenMembership(MembershipRole.OWNER, TenantStatus.ACTIVE);
+        when(memberships.findByTenantIdForUpdate(tenantId)).thenReturn(List.of(
+                new TenantMembership(tenantId, user.getId(), MembershipRole.OWNER)));
+        TokenResponse login = authService.login(new LoginRequest(EMAIL, PASSWORD, null));
+
+        authService.deleteAccount(user.getId(), PASSWORD);
+
+        verify(tenants).deleteById(tenantId);
+        verify(users).deleteById(user.getId());
+        verify(entityManager).createNativeQuery("DELETE FROM products WHERE tenant_id = CAST(:tenantId AS uuid)");
+        assertStatus(() -> authService.refresh(login.refreshToken()), HttpStatus.UNAUTHORIZED);
+    }
+
+    @Test
+    void deleteAccountLeavesASharedTenantWhenAnotherOwnerRemains() {
+        UUID tenantId = givenMembership(MembershipRole.MEMBER, TenantStatus.ACTIVE);
+        when(memberships.findByTenantIdForUpdate(tenantId)).thenReturn(List.of(
+                new TenantMembership(tenantId, user.getId(), MembershipRole.MEMBER),
+                new TenantMembership(tenantId, UUID.randomUUID(), MembershipRole.OWNER)));
+
+        authService.deleteAccount(user.getId(), PASSWORD);
+
+        verify(tenants, never()).deleteById(any());
+        verify(users).delete(user);
+        verify(users, never()).deleteById(any());
+    }
+
+    @Test
+    void deleteAccountRefusesToOrphanOtherMembers() {
+        UUID tenantId = givenMembership(MembershipRole.OWNER, TenantStatus.ACTIVE);
+        when(memberships.findByTenantIdForUpdate(tenantId)).thenReturn(List.of(
+                new TenantMembership(tenantId, user.getId(), MembershipRole.OWNER),
+                new TenantMembership(tenantId, UUID.randomUUID(), MembershipRole.MEMBER)));
+        TokenResponse login = authService.login(new LoginRequest(EMAIL, PASSWORD, null));
+
+        assertStatus(() -> authService.deleteAccount(user.getId(), PASSWORD), HttpStatus.CONFLICT);
+
+        verify(users, never()).delete(any());
+        verify(users, never()).deleteById(any());
+        verify(tenants, never()).deleteById(any());
+        assertThat(authService.refresh(login.refreshToken()).tenantId()).isEqualTo(tenantId);
+    }
+
+    @Test
+    void deleteAccountRejectsTheWrongPassword() {
+        givenMembership(MembershipRole.OWNER, TenantStatus.ACTIVE);
+
+        assertStatus(() -> authService.deleteAccount(user.getId(), "not the current password"),
+                HttpStatus.BAD_REQUEST);
+        verify(users, never()).delete(any());
+        verify(users, never()).deleteById(any());
+    }
+
     // ---- helpers ----
 
     private AuthService authServiceWithRefreshTtl(Duration refreshTtl) {
         JwtTokenService tokenService = new JwtTokenService(new JwtConfig().jwtEncoder(JWT_PROPERTIES), JWT_PROPERTIES);
         RefreshTokenService refreshTokenService =
                 new RefreshTokenService(refreshTokens, new RefreshTokenProperties(refreshTtl));
-        return new AuthService(users, memberships, tenants, passwordEncoder, tokenService, refreshTokenService);
+        return new AuthService(users, memberships, tenants, passwordEncoder, tokenService, refreshTokenService,
+                entityManager);
     }
 
     private UUID givenMembership(MembershipRole role, TenantStatus status) {

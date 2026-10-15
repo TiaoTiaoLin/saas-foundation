@@ -1,6 +1,7 @@
 package com.saas.foundation.auth;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -8,6 +9,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import java.util.UUID;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -20,6 +22,8 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.test.web.servlet.RequestBuilder;
+import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.ResultMatcher;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -28,6 +32,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.redis.testcontainers.RedisContainer;
+import com.saas.foundation.domain.product.ProductRepository;
 import com.saas.foundation.domain.tenant.Tenant;
 import com.saas.foundation.domain.tenant.TenantRepository;
 import com.saas.foundation.domain.user.MembershipRole;
@@ -39,6 +44,7 @@ import com.saas.foundation.domain.user.UserAccount;
 import com.saas.foundation.domain.user.UserAccountRepository;
 import com.saas.foundation.security.Hashing;
 import com.saas.foundation.support.PostgresRedisContainers;
+import com.saas.foundation.tenant.TenantContext;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -58,6 +64,13 @@ class AuthLoginIT {
     static void registerProps(DynamicPropertyRegistry registry) {
         PostgresRedisContainers.register(registry, POSTGRES, REDIS);
         registry.add("saas.rate-limit.enabled", () -> "false");
+        // Login, refresh, logout, and password changes share one client address in MockMvc.
+        registry.add("saas.auth-rate-limit.enabled", () -> "false");
+    }
+
+    @AfterEach
+    void clearTenantContext() {
+        TenantContext.clear();
     }
 
     @Autowired
@@ -79,17 +92,23 @@ class AuthLoginIT {
     TenantMembershipRepository tenantMembershipRepository;
 
     @Autowired
+    ProductRepository productRepository;
+
+    @Autowired
     RefreshTokenRepository refreshTokenRepository;
 
     @Test
     void loginTokenScopesProductRequestsToTheUsersTenant() throws Exception {
-        String email = uniqueEmail();
-        UUID tenantId = givenUserInNewTenant(email);
+        String ownerEmail = uniqueEmail();
+        String otherEmail = uniqueEmail();
+        UUID tenantId = givenUserInNewTenant(ownerEmail);
+        givenUserInNewTenant(otherEmail);
 
-        String token = login(email, PASSWORD);
+        String ownerToken = login(ownerEmail, PASSWORD);
+        String otherToken = login(otherEmail, PASSWORD);
 
         mockMvc.perform(post("/api/v1/products")
-                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                        .header(HttpHeaders.AUTHORIZATION, bearer(ownerToken))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"name":"Login Widget","sku":"LOGIN-1"}
@@ -98,20 +117,27 @@ class AuthLoginIT {
                 .andExpect(jsonPath("$.tenantId").value(tenantId.toString()));
 
         mockMvc.perform(get("/api/v1/products")
-                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                        .header(HttpHeaders.AUTHORIZATION, bearer(ownerToken)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.items.length()").value(1))
                 .andExpect(jsonPath("$.items[0].sku").value("LOGIN-1"));
+
+        mockMvc.perform(get("/api/v1/products")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(otherToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items.length()").value(0));
     }
 
     @Test
     void loginIsCaseInsensitiveOnEmail() throws Exception {
         String email = uniqueEmail();
-        givenUserInNewTenant(email);
+        UUID tenantId = givenUserInNewTenant(email);
 
         mockMvc.perform(loginRequest(email.toUpperCase(), PASSWORD))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.tokenType").value("Bearer"));
+                .andExpect(jsonPath("$.tokenType").value("Bearer"))
+                .andExpect(jsonPath("$.tenantId").value(tenantId.toString()))
+                .andExpect(jsonPath("$.accessToken").isNotEmpty());
     }
 
     @Test
@@ -130,12 +156,12 @@ class AuthLoginIT {
         UUID tenantId = givenUserInNewTenant(email);
         JsonNode login = loginTokens(email, PASSWORD);
 
-        JsonNode refreshed = refresh(login.get("refreshToken").asText(), status().isOk());
+        JsonNode refreshed = refresh(text(login, "refreshToken"), status().isOk());
 
-        assertThat(refreshed.get("refreshToken").asText()).isNotEqualTo(login.get("refreshToken").asText());
-        assertThat(refreshed.get("tenantId").asText()).isEqualTo(tenantId.toString());
+        assertThat(text(refreshed, "refreshToken")).isNotEqualTo(text(login, "refreshToken"));
+        assertThat(text(refreshed, "tenantId")).isEqualTo(tenantId.toString());
         mockMvc.perform(get("/api/v1/products")
-                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + refreshed.get("accessToken").asText()))
+                        .header(HttpHeaders.AUTHORIZATION, bearer(text(refreshed, "accessToken"))))
                 .andExpect(status().isOk());
     }
 
@@ -143,39 +169,42 @@ class AuthLoginIT {
     void reusingRotatedRefreshTokenRevokesTheSessionDurably() throws Exception {
         String email = uniqueEmail();
         givenUserInNewTenant(email);
-        String original = loginTokens(email, PASSWORD).get("refreshToken").asText();
-        String rotated = refresh(original, status().isOk()).get("refreshToken").asText();
+        String original = text(loginTokens(email, PASSWORD), "refreshToken");
+        String rotated = text(refresh(original, status().isOk()), "refreshToken");
 
-        refresh(original, status().isUnauthorized());
+        refresh(original, unauthorizedRefresh());
 
         // The revocation must have been committed even though the reuse request failed.
-        refresh(rotated, status().isUnauthorized());
+        refresh(rotated, unauthorizedRefresh());
     }
 
     @Test
     void logoutRevokesRefreshToken() throws Exception {
         String email = uniqueEmail();
         givenUserInNewTenant(email);
-        String refreshToken = loginTokens(email, PASSWORD).get("refreshToken").asText();
+        String refreshToken = text(loginTokens(email, PASSWORD), "refreshToken");
 
         mockMvc.perform(post("/api/v1/auth/logout")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(refreshBody(refreshToken)))
                 .andExpect(status().isNoContent());
 
-        refresh(refreshToken, status().isUnauthorized());
+        refresh(refreshToken, unauthorizedRefresh());
     }
 
     @Test
     void refreshTokenIsStoredOnlyAsHash() throws Exception {
         String email = uniqueEmail();
         givenUserInNewTenant(email);
-        String refreshToken = loginTokens(email, PASSWORD).get("refreshToken").asText();
+        String refreshToken = text(loginTokens(email, PASSWORD), "refreshToken");
+        String hash = Hashing.sha256Hex(refreshToken);
 
-        assertThat(refreshTokenRepository.findAll())
-                .extracting(RefreshToken::getTokenHash)
-                .contains(Hashing.sha256Hex(refreshToken))
-                .doesNotContain(refreshToken);
+        RefreshToken stored = refreshTokenRepository.findByTokenHash(hash).orElse(null);
+        assertThat(stored).isNotNull();
+        // CHAR(64) can come back blank-padded; the digest itself is what must be stored.
+        assertThat(stored.getTokenHash().trim()).isEqualTo(hash);
+        // A row stored under the raw token would mean the secret itself was persisted.
+        assertThat(refreshTokenRepository.findByTokenHash(refreshToken)).isEmpty();
     }
 
     @Test
@@ -195,7 +224,7 @@ class AuthLoginIT {
         JsonNode login = loginTokens(email, PASSWORD);
 
         MvcResult changed = mockMvc.perform(post("/api/v1/auth/password")
-                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + login.get("accessToken").asText())
+                        .header(HttpHeaders.AUTHORIZATION, bearer(text(login, "accessToken")))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"currentPassword":"%s","newPassword":"a different passphrase"}
@@ -204,14 +233,89 @@ class AuthLoginIT {
                 .andExpect(jsonPath("$.accessToken").isNotEmpty())
                 .andExpect(jsonPath("$.refreshToken").isNotEmpty())
                 .andReturn();
-        String newRefresh = objectMapper.readTree(changed.getResponse().getContentAsString())
-                .get("refreshToken").asText();
+        JsonNode session = objectMapper.readTree(changed.getResponse().getContentAsString());
 
-        refresh(login.get("refreshToken").asText(), status().isUnauthorized());
-        refresh(newRefresh, status().isOk());
+        refresh(text(login, "refreshToken"), unauthorizedRefresh());
+        refresh(text(session, "refreshToken"), status().isOk());
+        mockMvc.perform(get("/api/v1/products")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(text(session, "accessToken"))))
+                .andExpect(status().isOk());
 
         mockMvc.perform(loginRequest(email, "a different passphrase")).andExpect(status().isOk());
         mockMvc.perform(loginRequest(email, PASSWORD)).andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void deleteAccountRemovesTheOnlyMemberTenantAndItsProducts() throws Exception {
+        String email = uniqueEmail();
+        UUID tenantId = givenUserInNewTenant(email);
+        String sku = "sku-" + UUID.randomUUID();
+        JsonNode login = loginTokens(email, PASSWORD);
+
+        mockMvc.perform(post("/api/v1/products")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(text(login, "accessToken")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name":"Widget","sku":"%s"}
+                                """.formatted(sku)))
+                .andExpect(status().isCreated());
+        assertThat(productVisible(tenantId, sku)).as("product visible before delete").isTrue();
+
+        mockMvc.perform(delete("/api/v1/auth/account")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(text(login, "accessToken")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"currentPassword":"%s"}
+                                """.formatted(PASSWORD)))
+                .andExpect(status().isNoContent());
+
+        assertThat(userAccountRepository.findByEmail(email)).isEmpty();
+        assertThat(tenantRepository.findById(tenantId)).isEmpty();
+        assertThat(productVisible(tenantId, sku)).as("product removed with the tenant").isFalse();
+        refresh(text(login, "refreshToken"), unauthorizedRefresh());
+        mockMvc.perform(loginRequest(email, PASSWORD)).andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void deleteAccountRefusesWhenOtherMembersWouldLoseTheirOwner() throws Exception {
+        String email = uniqueEmail();
+        UUID tenantId = givenUserInNewTenant(email);
+        UserAccount guest = userAccountRepository.save(
+                new UserAccount(uniqueEmail(), passwordEncoder.encode(PASSWORD)));
+        tenantMembershipRepository.save(
+                new TenantMembership(tenantId, guest.getId(), MembershipRole.MEMBER));
+        String accessToken = login(email, PASSWORD);
+
+        mockMvc.perform(delete("/api/v1/auth/account")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(accessToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"currentPassword":"%s"}
+                                """.formatted(PASSWORD)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.message").value(AuthService.TRANSFER_OWNERSHIP));
+
+        assertThat(userAccountRepository.findByEmail(email)).isPresent();
+        assertThat(tenantRepository.findById(tenantId)).isPresent();
+        mockMvc.perform(loginRequest(email, PASSWORD)).andExpect(status().isOk());
+    }
+
+    @Test
+    void deleteAccountRejectsTheWrongPassword() throws Exception {
+        String email = uniqueEmail();
+        givenUserInNewTenant(email);
+        String accessToken = login(email, PASSWORD);
+
+        mockMvc.perform(delete("/api/v1/auth/account")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(accessToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"currentPassword":"not the current password"}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value(AuthService.CURRENT_PASSWORD_INCORRECT));
+
+        mockMvc.perform(loginRequest(email, PASSWORD)).andExpect(status().isOk());
     }
 
     private UUID givenUserInNewTenant(String email) {
@@ -222,24 +326,61 @@ class AuthLoginIT {
     }
 
     private String login(String email, String password) throws Exception {
-        return loginTokens(email, password).get("accessToken").asText();
+        return text(loginTokens(email, password), "accessToken");
     }
 
     private JsonNode loginTokens(String email, String password) throws Exception {
         MvcResult result = mockMvc.perform(loginRequest(email, password))
                 .andExpect(status().isOk())
+                .andExpect(jsonPath("$.accessToken").isNotEmpty())
+                .andExpect(jsonPath("$.refreshToken").isNotEmpty())
                 .andReturn();
         return objectMapper.readTree(result.getResponse().getContentAsString());
     }
 
-    private JsonNode refresh(String refreshToken, ResultMatcher expectedStatus) throws Exception {
-        MvcResult result = mockMvc.perform(post("/api/v1/auth/refresh")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(refreshBody(refreshToken)))
-                .andExpect(expectedStatus)
-                .andReturn();
+    private JsonNode refresh(String refreshToken, ResultMatcher... expected) throws Exception {
+        ResultActions actions = mockMvc.perform(post("/api/v1/auth/refresh")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(refreshBody(refreshToken)));
+        for (ResultMatcher matcher : expected) {
+            actions = actions.andExpect(matcher);
+        }
+        MvcResult result = actions.andReturn();
         String body = result.getResponse().getContentAsString();
-        return body.isEmpty() ? null : objectMapper.readTree(body);
+        return body.isBlank() ? null : objectMapper.readTree(body);
+    }
+
+    private static ResultMatcher unauthorizedRefresh() {
+        return result -> {
+            status().isUnauthorized().match(result);
+            jsonPath("$.message").value(RefreshTokenService.INVALID_REFRESH_TOKEN).match(result);
+        };
+    }
+
+    /**
+     * Same read used before and after account deletion. An empty result only counts as
+     * "deleted" when this query could see the row beforehand.
+     */
+    private boolean productVisible(UUID tenantId, String sku) {
+        TenantContext.setTenantId(tenantId.toString());
+        try {
+            return productRepository.findBySku(sku).isPresent();
+        } finally {
+            TenantContext.clear();
+        }
+    }
+
+    private static String text(JsonNode node, String field) {
+        assertThat(node).as(field).isNotNull();
+        JsonNode value = node.get(field);
+        assertThat(value).as(field).isNotNull();
+        assertThat(value.isNull()).as(field).isFalse();
+        assertThat(value.asText()).as(field).isNotBlank();
+        return value.asText();
+    }
+
+    private static String bearer(String accessToken) {
+        return "Bearer " + accessToken;
     }
 
     private static String refreshBody(String refreshToken) {
@@ -248,7 +389,7 @@ class AuthLoginIT {
                 """.formatted(refreshToken);
     }
 
-    private static org.springframework.test.web.servlet.RequestBuilder loginRequest(String email, String password) {
+    private static RequestBuilder loginRequest(String email, String password) {
         return post("/api/v1/auth/login")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""

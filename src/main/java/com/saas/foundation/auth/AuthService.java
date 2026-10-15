@@ -1,5 +1,6 @@
 package com.saas.foundation.auth;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -13,6 +14,7 @@ import org.springframework.web.server.ResponseStatusException;
 import com.saas.foundation.auth.RefreshTokenService.IssuedRefreshToken;
 import com.saas.foundation.domain.tenant.Tenant;
 import com.saas.foundation.domain.tenant.TenantRepository;
+import com.saas.foundation.domain.user.MembershipRole;
 import com.saas.foundation.domain.user.RefreshToken;
 import com.saas.foundation.domain.user.TenantMembership;
 import com.saas.foundation.domain.user.TenantMembershipRepository;
@@ -22,6 +24,7 @@ import com.saas.foundation.security.JwtTokenService;
 import com.saas.foundation.security.JwtTokenService.IssuedToken;
 import com.saas.foundation.security.PasswordConfig;
 
+import jakarta.persistence.EntityManager;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
@@ -31,6 +34,7 @@ public class AuthService {
     static final String INVALID_CREDENTIALS = "Invalid email or password";
     static final String CURRENT_PASSWORD_INCORRECT = "Current password is incorrect";
     static final String PASSWORD_UNCHANGED = "Choose a different password";
+    static final String TRANSFER_OWNERSHIP = "Transfer ownership before deleting this account";
 
     private final UserAccountRepository userAccountRepository;
     private final TenantMembershipRepository tenantMembershipRepository;
@@ -38,6 +42,7 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenService jwtTokenService;
     private final RefreshTokenService refreshTokenService;
+    private final EntityManager entityManager;
 
     /** Compared against when the email is unknown, so response time does not reveal which emails exist. */
     private final String dummyPasswordHash;
@@ -47,13 +52,15 @@ public class AuthService {
                        TenantRepository tenantRepository,
                        PasswordEncoder passwordEncoder,
                        JwtTokenService jwtTokenService,
-                       RefreshTokenService refreshTokenService) {
+                       RefreshTokenService refreshTokenService,
+                       EntityManager entityManager) {
         this.userAccountRepository = userAccountRepository;
         this.tenantMembershipRepository = tenantMembershipRepository;
         this.tenantRepository = tenantRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtTokenService = jwtTokenService;
         this.refreshTokenService = refreshTokenService;
+        this.entityManager = entityManager;
         this.dummyPasswordHash = passwordEncoder.encode("dummy-password-for-unknown-users");
     }
 
@@ -124,6 +131,81 @@ public class AuthService {
         IssuedRefreshToken refreshToken = refreshTokenService.issue(user.getId(), membership.getTenantId());
         log.info("Password changed userId={} tenantId={}", user.getId(), membership.getTenantId());
         return tokenResponse(user, membership, refreshToken);
+    }
+
+    /**
+     * Deletes this login. Memberships in organizations that have another owner are removed.
+     * An organization whose only member is this user is deleted with its products.
+     * An organization that still has other people, and no other owner, is left unchanged
+     * and the delete is refused.
+     */
+    @Transactional
+    public void deleteAccount(UUID userId, String currentPassword) {
+        UserAccount user = userAccountRepository.findById(userId)
+                .filter(UserAccount::isEnabled)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Sign in again to continue."));
+        if (PasswordConfig.exceedsMaxPasswordBytes(currentPassword)
+                || !passwordEncoder.matches(currentPassword, user.getPasswordHash())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, CURRENT_PASSWORD_INCORRECT);
+        }
+
+        List<UUID> tenantIds = tenantMembershipRepository.findByUserId(userId).stream()
+                .map(TenantMembership::getTenantId)
+                .distinct()
+                .sorted()
+                .toList();
+        List<UUID> soleMemberTenants = new ArrayList<>();
+        for (UUID tenantId : tenantIds) {
+            List<TenantMembership> locked = tenantMembershipRepository.findByTenantIdForUpdate(tenantId);
+            TenantMembership mine = locked.stream()
+                    .filter(membership -> membership.getUserId().equals(userId))
+                    .findFirst()
+                    .orElse(null);
+            if (mine == null) {
+                continue;
+            }
+            boolean soleOwner = mine.getRole() == MembershipRole.OWNER && ownerCount(locked) == 1;
+            if (soleOwner && locked.size() > 1) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, TRANSFER_OWNERSHIP);
+            }
+            if (soleOwner) {
+                soleMemberTenants.add(tenantId);
+            }
+        }
+
+        refreshTokenService.revokeAllForUser(userId);
+        for (UUID tenantId : soleMemberTenants) {
+            deleteSoleMemberTenant(tenantId);
+        }
+        if (!soleMemberTenants.isEmpty()) {
+            entityManager.flush();
+            entityManager.clear();
+            userAccountRepository.deleteById(userId);
+        } else {
+            userAccountRepository.delete(user);
+        }
+        log.info("Account deleted userId={}", userId);
+    }
+
+    /**
+     * Products are protected by row-level security, so the tenant GUC has to match
+     * before those rows can be removed. Memberships and refresh tokens then follow
+     * the tenant delete.
+     */
+    private void deleteSoleMemberTenant(UUID tenantId) {
+        String tenant = tenantId.toString();
+        entityManager.createNativeQuery("SELECT set_config('app.current_tenant', :tenantId, true)")
+                .setParameter("tenantId", tenant)
+                .getSingleResult();
+        entityManager.createNativeQuery("DELETE FROM products WHERE tenant_id = CAST(:tenantId AS uuid)")
+                .setParameter("tenantId", tenant)
+                .executeUpdate();
+        tenantRepository.deleteById(tenantId);
+        entityManager.flush();
+    }
+
+    private static long ownerCount(List<TenantMembership> memberships) {
+        return memberships.stream().filter(membership -> membership.getRole() == MembershipRole.OWNER).count();
     }
 
     private TokenResponse tokenResponse(UserAccount user, TenantMembership membership,
