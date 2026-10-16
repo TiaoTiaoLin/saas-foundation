@@ -17,6 +17,10 @@ public class UserAccount extends AuditedEntity {
     @Column(nullable = false, length = 320)
     private String email;
 
+    /** Display name. Empty until the person sets one. */
+    @Column(nullable = false, length = 80)
+    private String name = "";
+
     @Column(name = "password_hash", nullable = false)
     private String passwordHash;
 

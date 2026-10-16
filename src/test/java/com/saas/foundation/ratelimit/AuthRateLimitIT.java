@@ -106,7 +106,7 @@ class AuthRateLimitIT {
                 })
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
-                        {"organizationName":"Acme","adminEmail":"%s","adminPassword":"correct horse battery staple"}
+                        {"organizationName":"Acme","adminName":"Ada","adminEmail":"%s","adminPassword":"correct horse battery staple"}
                         """.formatted(email));
     }
 

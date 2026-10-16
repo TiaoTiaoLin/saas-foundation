@@ -222,7 +222,7 @@ public class MembershipService {
     }
 
     private static MemberResponse toResponse(TenantMembership membership, UserAccount user) {
-        return new MemberResponse(membership.getUserId(), user.getEmail(), membership.getRole());
+        return new MemberResponse(membership.getUserId(), user.getEmail(), user.getName(), membership.getRole());
     }
 
     private static long ownerCount(List<TenantMembership> memberships) {

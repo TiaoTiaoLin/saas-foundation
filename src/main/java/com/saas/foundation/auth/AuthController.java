@@ -13,6 +13,7 @@ import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
@@ -31,13 +32,16 @@ public class AuthController {
 
     private final AuthService authService;
     private final PasswordResetService passwordResetService;
+    private final ProfileService profileService;
     private final AuthRateLimiter authRateLimiter;
 
     public AuthController(AuthService authService,
                           PasswordResetService passwordResetService,
+                          ProfileService profileService,
                           AuthRateLimiter authRateLimiter) {
         this.authService = authService;
         this.passwordResetService = passwordResetService;
+        this.profileService = profileService;
         this.authRateLimiter = authRateLimiter;
     }
 
@@ -58,6 +62,18 @@ public class AuthController {
     public void logout(@Valid @RequestBody RefreshTokenRequest request, HttpServletRequest httpRequest) {
         authRateLimiter.checkRefresh(httpRequest.getRemoteAddr());
         authService.logout(request.refreshToken());
+    }
+
+    @GetMapping("/profile")
+    @PreAuthorize("isAuthenticated()")
+    public ProfileResponse profile() {
+        return profileService.get(currentUserId());
+    }
+
+    @PutMapping("/profile")
+    @PreAuthorize("isAuthenticated()")
+    public ProfileResponse updateProfile(@Valid @RequestBody UpdateProfileRequest request) {
+        return profileService.update(currentUserId(), request.name());
     }
 
     @GetMapping("/organizations")

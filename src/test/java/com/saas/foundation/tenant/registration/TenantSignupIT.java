@@ -118,7 +118,7 @@ class TenantSignupIT {
         return post("/api/v1/tenants/registrations")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
-                        {"organizationName":"%s","adminEmail":"%s","adminPassword":"%s"}
+                        {"organizationName":"%s","adminName":"Ada","adminEmail":"%s","adminPassword":"%s"}
                         """.formatted(organizationName, email, password));
     }
 

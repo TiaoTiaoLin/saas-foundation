@@ -11,6 +11,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.server.ResponseStatusException;
 
+import com.saas.foundation.auth.UserName;
 import com.saas.foundation.domain.tenant.Tenant;
 import com.saas.foundation.domain.tenant.TenantRepository;
 import com.saas.foundation.domain.user.MembershipRole;
@@ -55,6 +56,7 @@ public class TenantRegistrationService {
 
     public RegisterTenantResponse register(RegisterTenantRequest request) {
         String organizationName = request.organizationName().trim();
+        String adminName = UserName.normalize(request.adminName());
         String adminEmail = request.adminEmail().trim();
         if (PasswordConfig.exceedsMaxPasswordBytes(request.adminPassword())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
@@ -62,7 +64,7 @@ public class TenantRegistrationService {
         }
         String passwordHash = passwordEncoder.encode(request.adminPassword());
 
-        CreatedTenant created = createTenantWithOwner(organizationName, adminEmail, passwordHash);
+        CreatedTenant created = createTenantWithOwner(organizationName, adminName, adminEmail, passwordHash);
         String tenantId = created.tenantId().toString();
 
         TenantRegisteredEvent event = TenantRegisteredEvent.of(tenantId, organizationName, adminEmail);
@@ -71,14 +73,17 @@ public class TenantRegistrationService {
         return new RegisterTenantResponse(tenantId, organizationName, adminEmail);
     }
 
-    private CreatedTenant createTenantWithOwner(String organizationName, String adminEmail, String passwordHash) {
+    private CreatedTenant createTenantWithOwner(String organizationName, String adminName, String adminEmail,
+                                                String passwordHash) {
         try {
             return transactionTemplate.execute(status -> {
                 if (userAccountRepository.findByEmail(adminEmail).isPresent()) {
                     throw emailTaken();
                 }
                 Tenant tenant = tenantRepository.save(new Tenant(organizationName));
-                UserAccount admin = userAccountRepository.save(new UserAccount(adminEmail, passwordHash));
+                UserAccount admin = new UserAccount(adminEmail, passwordHash);
+                admin.setName(adminName);
+                admin = userAccountRepository.save(admin);
                 tenantMembershipRepository.save(
                         new TenantMembership(tenant.getId(), admin.getId(), MembershipRole.OWNER));
                 return new CreatedTenant(tenant.getId(), admin.getId());

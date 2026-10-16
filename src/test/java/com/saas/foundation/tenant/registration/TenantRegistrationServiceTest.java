@@ -72,7 +72,7 @@ class TenantRegistrationServiceTest {
     @Test
     void createsTenantAdminUserAndOwnerMembership() {
         RegisterTenantResponse response = service.register(
-                new RegisterTenantRequest("  Acme Corp ", " owner@acme.test ", PASSWORD));
+                new RegisterTenantRequest("  Acme Corp ", "  Ada Lovelace  ", " owner@acme.test ", PASSWORD));
 
         ArgumentCaptor<Tenant> tenant = ArgumentCaptor.forClass(Tenant.class);
         ArgumentCaptor<UserAccount> admin = ArgumentCaptor.forClass(UserAccount.class);
@@ -83,6 +83,7 @@ class TenantRegistrationServiceTest {
 
         assertThat(tenant.getValue().getName()).isEqualTo("Acme Corp");
         assertThat(tenant.getValue().isActive()).isTrue();
+        assertThat(admin.getValue().getName()).isEqualTo("Ada Lovelace");
         assertThat(admin.getValue().getEmail()).isEqualTo("owner@acme.test");
         assertThat(admin.getValue().getPasswordHash()).isNotEqualTo(PASSWORD);
         assertThat(passwordEncoder.matches(PASSWORD, admin.getValue().getPasswordHash())).isTrue();
@@ -97,7 +98,7 @@ class TenantRegistrationServiceTest {
 
     @Test
     void registrationEventIsPublishedAfterCommit() {
-        service.register(new RegisterTenantRequest("Acme", "owner@acme.test", PASSWORD));
+        service.register(new RegisterTenantRequest("Acme", "Ada", "owner@acme.test", PASSWORD));
 
         InOrder order = inOrder(memberships, transactionManager, publisher);
         order.verify(memberships).save(any(TenantMembership.class));
@@ -110,7 +111,7 @@ class TenantRegistrationServiceTest {
         when(users.findByEmail("owner@acme.test"))
                 .thenReturn(Optional.of(new UserAccount("owner@acme.test", "hash")));
 
-        assertStatus(() -> service.register(new RegisterTenantRequest("Acme", "owner@acme.test", PASSWORD)),
+        assertStatus(() -> service.register(new RegisterTenantRequest("Acme", "Ada", "owner@acme.test", PASSWORD)),
                 HttpStatus.CONFLICT);
 
         verify(tenants, never()).save(any());
@@ -122,7 +123,7 @@ class TenantRegistrationServiceTest {
     void concurrentDuplicateEmailIsConflict() {
         when(users.save(any(UserAccount.class))).thenThrow(new DataIntegrityViolationException("uk_users_email_lower"));
 
-        assertStatus(() -> service.register(new RegisterTenantRequest("Acme", "owner@acme.test", PASSWORD)),
+        assertStatus(() -> service.register(new RegisterTenantRequest("Acme", "Ada", "owner@acme.test", PASSWORD)),
                 HttpStatus.CONFLICT);
         verify(publisher, never()).publishTenantRegistered(any());
     }
@@ -131,7 +132,7 @@ class TenantRegistrationServiceTest {
     void passwordOver72BytesIsRejected() {
         String multiByte = "é".repeat(40); // 40 characters, 80 bytes in UTF-8
 
-        assertStatus(() -> service.register(new RegisterTenantRequest("Acme", "owner@acme.test", multiByte)),
+        assertStatus(() -> service.register(new RegisterTenantRequest("Acme", "Ada", "owner@acme.test", multiByte)),
                 HttpStatus.BAD_REQUEST);
         verify(tenants, never()).save(any());
     }
