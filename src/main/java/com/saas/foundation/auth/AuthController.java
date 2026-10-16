@@ -1,5 +1,6 @@
 package com.saas.foundation.auth;
 
+import java.util.List;
 import java.util.UUID;
 
 import org.springframework.http.HttpStatus;
@@ -10,6 +11,7 @@ import org.springframework.security.oauth2.server.resource.authentication.JwtAut
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -58,12 +60,31 @@ public class AuthController {
         authService.logout(request.refreshToken());
     }
 
+    @GetMapping("/organizations")
+    @PreAuthorize("isAuthenticated()")
+    public List<LoginOrganization> organizations() {
+        return authService.listOrganizations(currentUserId());
+    }
+
+    @PostMapping("/organizations/switch")
+    @PreAuthorize("isAuthenticated()")
+    public TokenResponse switchOrganization(@Valid @RequestBody SwitchOrganizationRequest request,
+                                            HttpServletRequest httpRequest) {
+        authRateLimiter.checkRefresh(httpRequest.getRemoteAddr());
+        JwtAuthenticationToken jwt = currentJwt();
+        String tenantId = jwt.getToken().getClaimAsString(JwtTokenService.TENANT_ID_CLAIM);
+        if (tenantId == null || tenantId.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Sign in again to continue.");
+        }
+        return authService.switchOrganization(currentUserId(jwt), UUID.fromString(tenantId), request);
+    }
+
     @PostMapping("/password")
     @PreAuthorize("isAuthenticated()")
     public TokenResponse changePassword(@Valid @RequestBody ChangePasswordRequest request,
                                         HttpServletRequest httpRequest) {
         JwtAuthenticationToken jwt = currentJwt();
-        UUID userId = UUID.fromString(jwt.getToken().getSubject());
+        UUID userId = currentUserId(jwt);
         authRateLimiter.checkPasswordChange(httpRequest.getRemoteAddr(), userId);
         String tenantId = jwt.getToken().getClaimAsString(JwtTokenService.TENANT_ID_CLAIM);
         if (tenantId == null || tenantId.isBlank()) {
@@ -76,7 +97,7 @@ public class AuthController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     @PreAuthorize("isAuthenticated()")
     public void deleteAccount(@Valid @RequestBody DeleteAccountRequest request, HttpServletRequest httpRequest) {
-        UUID userId = UUID.fromString(currentJwt().getToken().getSubject());
+        UUID userId = currentUserId();
         authRateLimiter.checkPasswordChange(httpRequest.getRemoteAddr(), userId);
         authService.deleteAccount(userId, request.currentPassword());
     }
@@ -95,6 +116,14 @@ public class AuthController {
                                      HttpServletRequest httpRequest) {
         authRateLimiter.checkPasswordResetConfirm(httpRequest.getRemoteAddr());
         passwordResetService.confirmReset(request.token(), request.newPassword());
+    }
+
+    private static UUID currentUserId() {
+        return currentUserId(currentJwt());
+    }
+
+    private static UUID currentUserId(JwtAuthenticationToken jwt) {
+        return UUID.fromString(jwt.getToken().getSubject());
     }
 
     private static JwtAuthenticationToken currentJwt() {

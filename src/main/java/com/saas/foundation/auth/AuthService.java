@@ -1,5 +1,6 @@
 package com.saas.foundation.auth;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -90,6 +91,49 @@ public class AuthService {
 
         IssuedRefreshToken next = refreshTokenService.rotate(current);
         return tokenResponse(user, membership, next);
+    }
+
+    /** Active organizations this user can open. Suspended organizations are omitted. */
+    @Transactional(readOnly = true)
+    public List<LoginOrganization> listOrganizations(UUID userId) {
+        userAccountRepository.findById(userId)
+                .filter(UserAccount::isEnabled)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Sign in again to continue."));
+        return tenantMembershipRepository.findByUserId(userId).stream()
+                .filter(membership -> isActive(membership.getTenantId()))
+                .map(this::toLoginOrganization)
+                .sorted(Comparator.comparing(LoginOrganization::name, String.CASE_INSENSITIVE_ORDER))
+                .toList();
+    }
+
+    /**
+     * Replaces this browser's session with one for {@code request.tenantId()}.
+     * Only the presented refresh token is revoked, so other devices stay signed in.
+     */
+    @Transactional(noRollbackFor = RefreshTokenReuseException.class)
+    public TokenResponse switchOrganization(UUID userId, UUID currentTenantId, SwitchOrganizationRequest request) {
+        RefreshToken current = refreshTokenService.requireUsable(request.refreshToken());
+        if (!current.getUserId().equals(userId) || !current.getTenantId().equals(currentTenantId)) {
+            throw RefreshTokenService.invalid();
+        }
+        UserAccount user = userAccountRepository.findById(userId)
+                .filter(UserAccount::isEnabled)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Sign in again to continue."));
+        TenantMembership membership = tenantMembershipRepository
+                .findByTenantIdAndUserId(request.tenantId(), userId)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.FORBIDDEN, "Not a member of the requested tenant"));
+        requireActiveTenant(membership.getTenantId());
+
+        if (membership.getTenantId().equals(currentTenantId)) {
+            return tokenResponse(user, membership,
+                    new IssuedRefreshToken(current.getId(), request.refreshToken(), current.getExpiresAt()));
+        }
+
+        current.revoke(Instant.now());
+        IssuedRefreshToken refreshToken = refreshTokenService.issue(user.getId(), membership.getTenantId());
+        log.info("Organization switched userId={} tenantId={}", user.getId(), membership.getTenantId());
+        return tokenResponse(user, membership, refreshToken);
     }
 
     @Transactional

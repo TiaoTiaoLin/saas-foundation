@@ -381,6 +381,92 @@ class AuthServiceTest {
     }
 
     @Test
+    void listOrganizationsOmitsSuspendedTenants() {
+        UUID first = givenMembership(MembershipRole.OWNER, TenantStatus.ACTIVE);
+        UUID second = givenAdditionalMembership(first, MembershipRole.MEMBER);
+        Tenant suspended = new Tenant("Suspended Co");
+        ReflectionTestUtils.setField(suspended, "id", second);
+        suspended.setStatus(TenantStatus.SUSPENDED);
+        when(tenants.findById(second)).thenReturn(Optional.of(suspended));
+
+        assertThat(authService.listOrganizations(user.getId()))
+                .extracting(LoginOrganization::name, LoginOrganization::tenantId)
+                .containsExactly(tuple("Acme", first));
+    }
+
+    @Test
+    void switchOrganizationMovesThisSessionAndLeavesOtherDevicesSignedIn() {
+        UUID first = givenMembership(MembershipRole.OWNER, TenantStatus.ACTIVE);
+        UUID second = givenAdditionalMembership(first, MembershipRole.MEMBER);
+        TokenResponse otherDevice = authService.login(new LoginRequest(EMAIL, PASSWORD, first));
+        TokenResponse current = authService.login(new LoginRequest(EMAIL, PASSWORD, first));
+
+        TokenResponse switched = authService.switchOrganization(
+                user.getId(), first, new SwitchOrganizationRequest(second, current.refreshToken()));
+
+        assertThat(switched.tenantId()).isEqualTo(second);
+        assertThat(switched.organizationName()).isEqualTo("Globex");
+        assertThat(jwtDecoder.decode(switched.accessToken()).getClaimAsStringList(JwtTokenService.ROLES_CLAIM))
+                .containsExactly("MEMBER");
+        RefreshToken revoked = refreshTokensByHash.get(Hashing.sha256Hex(current.refreshToken()));
+        assertThat(revoked.isRevoked()).isTrue();
+        assertThat(revoked.getReplacedBy()).isNull();
+        assertThat(refreshTokensByHash.get(Hashing.sha256Hex(otherDevice.refreshToken())).isRevoked()).isFalse();
+        assertStatus(() -> authService.refresh(current.refreshToken()), HttpStatus.UNAUTHORIZED);
+        assertThat(authService.refresh(otherDevice.refreshToken()).tenantId()).isEqualTo(first);
+        assertThat(authService.refresh(switched.refreshToken()).tenantId()).isEqualTo(second);
+    }
+
+    @Test
+    void switchOrganizationRejectsATenantTheUserDoesNotBelongTo() {
+        UUID first = givenMembership(MembershipRole.OWNER, TenantStatus.ACTIVE);
+        TokenResponse current = authService.login(new LoginRequest(EMAIL, PASSWORD, first));
+
+        assertStatus(() -> authService.switchOrganization(user.getId(), first,
+                new SwitchOrganizationRequest(UUID.randomUUID(), current.refreshToken())), HttpStatus.FORBIDDEN);
+        assertThat(refreshTokensByHash.get(Hashing.sha256Hex(current.refreshToken())).isRevoked()).isFalse();
+    }
+
+    @Test
+    void switchOrganizationRejectsARefreshTokenFromAnotherSession() {
+        UUID first = givenMembership(MembershipRole.OWNER, TenantStatus.ACTIVE);
+        UUID second = givenAdditionalMembership(first, MembershipRole.MEMBER);
+        TokenResponse onSecond = authService.login(new LoginRequest(EMAIL, PASSWORD, second));
+
+        assertStatus(() -> authService.switchOrganization(user.getId(), first,
+                new SwitchOrganizationRequest(second, onSecond.refreshToken())), HttpStatus.UNAUTHORIZED);
+        assertThat(refreshTokensByHash.get(Hashing.sha256Hex(onSecond.refreshToken())).isRevoked()).isFalse();
+    }
+
+    @Test
+    void switchOrganizationRejectsASuspendedTenant() {
+        UUID first = givenMembership(MembershipRole.OWNER, TenantStatus.ACTIVE);
+        UUID second = givenAdditionalMembership(first, MembershipRole.MEMBER);
+        Tenant suspended = new Tenant("Globex");
+        ReflectionTestUtils.setField(suspended, "id", second);
+        suspended.setStatus(TenantStatus.SUSPENDED);
+        when(tenants.findById(second)).thenReturn(Optional.of(suspended));
+        TokenResponse current = authService.login(new LoginRequest(EMAIL, PASSWORD, first));
+
+        assertStatus(() -> authService.switchOrganization(user.getId(), first,
+                new SwitchOrganizationRequest(second, current.refreshToken())), HttpStatus.FORBIDDEN);
+        assertThat(refreshTokensByHash.get(Hashing.sha256Hex(current.refreshToken())).isRevoked()).isFalse();
+    }
+
+    @Test
+    void stayingInTheCurrentOrganizationKeepsTheRefreshToken() {
+        UUID tenantId = givenMembership(MembershipRole.OWNER, TenantStatus.ACTIVE);
+        TokenResponse current = authService.login(new LoginRequest(EMAIL, PASSWORD, tenantId));
+
+        TokenResponse same = authService.switchOrganization(
+                user.getId(), tenantId, new SwitchOrganizationRequest(tenantId, current.refreshToken()));
+
+        assertThat(same.refreshToken()).isEqualTo(current.refreshToken());
+        assertThat(same.tenantId()).isEqualTo(tenantId);
+        assertThat(refreshTokensByHash.get(Hashing.sha256Hex(current.refreshToken())).isRevoked()).isFalse();
+    }
+
+    @Test
     void deleteAccountRejectsTheWrongPassword() {
         givenMembership(MembershipRole.OWNER, TenantStatus.ACTIVE);
 
