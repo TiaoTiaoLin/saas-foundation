@@ -1,7 +1,9 @@
 package com.saas.foundation.integration.email;
 
 import java.io.IOException;
+import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -21,6 +23,7 @@ import lombok.extern.slf4j.Slf4j;
 public class SimulatedEmailProviderClient implements EmailProviderClient {
 
     private final AtomicInteger attempts = new AtomicInteger();
+    private final List<EmailMessage> sent = new CopyOnWriteArrayList<>();
     private final double failureRate;
 
     public SimulatedEmailProviderClient(
@@ -37,8 +40,17 @@ public class SimulatedEmailProviderClient implements EmailProviderClient {
                     new IOException("connection reset"));
         }
         String messageId = "msg_" + UUID.randomUUID();
+        sent.add(message);
         log.info("Email accepted by provider messageId={} to={}", messageId, message.to());
         return EmailSendResult.ok(messageId);
+    }
+
+    public void clearSent() {
+        sent.clear();
+    }
+
+    public List<EmailMessage> sentMessages() {
+        return List.copyOf(sent);
     }
 
     int attemptCount() {

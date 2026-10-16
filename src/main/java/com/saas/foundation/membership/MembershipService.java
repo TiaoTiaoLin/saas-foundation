@@ -1,8 +1,13 @@
 package com.saas.foundation.membership;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.security.SecureRandom;
 import java.time.Instant;
+import java.util.Base64;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.function.Function;
@@ -14,6 +19,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import com.saas.foundation.domain.tenant.Tenant;
+import com.saas.foundation.domain.tenant.TenantRepository;
+import com.saas.foundation.domain.user.MembershipInvite;
+import com.saas.foundation.domain.user.MembershipInviteRepository;
 import com.saas.foundation.domain.user.MembershipRole;
 import com.saas.foundation.domain.user.RefreshTokenRepository;
 import com.saas.foundation.domain.user.TenantMembership;
@@ -22,6 +31,8 @@ import com.saas.foundation.domain.user.UserAccount;
 import com.saas.foundation.domain.user.UserAccountRepository;
 import com.saas.foundation.integration.email.EmailSendResult;
 import com.saas.foundation.integration.email.ResilientEmailService;
+import com.saas.foundation.security.Hashing;
+import com.saas.foundation.security.MembershipInviteProperties;
 import com.saas.foundation.tenant.TenantContext;
 
 @Service
@@ -32,20 +43,35 @@ public class MembershipService {
     static final String ALREADY_MEMBER = "User is already a member of this tenant";
     static final String UNKNOWN_EMAIL = "No account with this email";
     static final String MEMBER_NOT_FOUND = "Member not found";
+    static final String INVITE_INVALID = "This invitation is invalid or has expired";
+    static final String INVITE_WRONG_ACCOUNT = "This invitation was sent to a different account";
+    static final String TENANT_INACTIVE = "This organization is not active";
+
+    private static final int TOKEN_BYTES = 32;
+    private static final SecureRandom RANDOM = new SecureRandom();
 
     private final UserAccountRepository userAccountRepository;
     private final TenantMembershipRepository tenantMembershipRepository;
+    private final MembershipInviteRepository membershipInviteRepository;
+    private final TenantRepository tenantRepository;
     private final RefreshTokenRepository refreshTokenRepository;
     private final ResilientEmailService resilientEmailService;
+    private final MembershipInviteProperties inviteProperties;
 
     public MembershipService(UserAccountRepository userAccountRepository,
                              TenantMembershipRepository tenantMembershipRepository,
+                             MembershipInviteRepository membershipInviteRepository,
+                             TenantRepository tenantRepository,
                              RefreshTokenRepository refreshTokenRepository,
-                             ResilientEmailService resilientEmailService) {
+                             ResilientEmailService resilientEmailService,
+                             MembershipInviteProperties inviteProperties) {
         this.userAccountRepository = userAccountRepository;
         this.tenantMembershipRepository = tenantMembershipRepository;
+        this.membershipInviteRepository = membershipInviteRepository;
+        this.tenantRepository = tenantRepository;
         this.refreshTokenRepository = refreshTokenRepository;
         this.resilientEmailService = resilientEmailService;
+        this.inviteProperties = inviteProperties;
     }
 
     @Transactional(readOnly = true)
@@ -74,26 +100,62 @@ public class MembershipService {
 
         String email = request.email().trim();
         UserAccount user = userAccountRepository.findByEmail(email)
+                .filter(UserAccount::isEnabled)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, UNKNOWN_EMAIL));
         if (tenantMembershipRepository.findByTenantIdAndUserId(tenantId, user.getId()).isPresent()) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, ALREADY_MEMBER);
         }
 
-        try {
-            tenantMembershipRepository.saveAndFlush(
-                    new TenantMembership(tenantId, user.getId(), request.role()));
-        } catch (DataIntegrityViolationException ex) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, ALREADY_MEMBER);
-        }
+        Tenant tenant = requireActiveTenant(tenantId);
+        byte[] bytes = new byte[TOKEN_BYTES];
+        RANDOM.nextBytes(bytes);
+        String token = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+        membershipInviteRepository.deletePending(tenantId, user.getId());
+        membershipInviteRepository.save(new MembershipInvite(
+                tenantId,
+                user.getId(),
+                request.role(),
+                Hashing.sha256Hex(token),
+                Instant.now().plus(inviteProperties.ttl())));
 
+        String link = acceptLink(token);
         EmailSendResult emailResult = resilientEmailService.sendMembershipInvite(
-                tenantId.toString(), user.getEmail(), request.role().name());
+                user.getEmail(), tenant.getName(), displayRole(request.role()), link);
         return new InviteMemberResponse(
                 user.getId(),
                 user.getEmail(),
                 request.role(),
                 emailResult.success(),
                 emailResult.detail());
+    }
+
+    /**
+     * Describes an open invitation for the signed-in user. Does not create a membership.
+     */
+    @Transactional(readOnly = true)
+    public MembershipInvitePreview preview(UUID callerId, String token) {
+        MembershipInvite invite = requireOpenInvite(token, callerId);
+        Tenant tenant = requireActiveTenant(invite.getTenantId());
+        return new MembershipInvitePreview(tenant.getName(), invite.getRole());
+    }
+
+    /**
+     * Creates the membership for the signed-in user. No email is sent.
+     */
+    @Transactional
+    public AcceptMembershipInviteResponse accept(UUID callerId, String token) {
+        MembershipInvite invite = requireOpenInvite(token, callerId);
+        Tenant tenant = requireActiveTenant(invite.getTenantId());
+        if (tenantMembershipRepository.findByTenantIdAndUserId(tenant.getId(), callerId).isEmpty()) {
+            try {
+                tenantMembershipRepository.saveAndFlush(
+                        new TenantMembership(tenant.getId(), callerId, invite.getRole()));
+            } catch (DataIntegrityViolationException ex) {
+                // A concurrent accept already created the membership.
+            }
+        }
+        invite.markAccepted(Instant.now());
+        return new AcceptMembershipInviteResponse(tenant.getId(), tenant.getName(), invite.getRole());
     }
 
     @Transactional
@@ -165,6 +227,40 @@ public class MembershipService {
 
     private static long ownerCount(List<TenantMembership> memberships) {
         return memberships.stream().filter(membership -> membership.getRole() == MembershipRole.OWNER).count();
+    }
+
+    private MembershipInvite requireOpenInvite(String token, UUID callerId) {
+        MembershipInvite invite = membershipInviteRepository.findByTokenHash(Hashing.sha256Hex(token.trim()))
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, INVITE_INVALID));
+        if (invite.isAccepted() || invite.isExpiredAt(Instant.now())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, INVITE_INVALID);
+        }
+        if (!invite.getUserId().equals(callerId)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, INVITE_WRONG_ACCOUNT);
+        }
+        userAccountRepository.findById(callerId)
+                .filter(UserAccount::isEnabled)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, INVITE_INVALID));
+        return invite;
+    }
+
+    private Tenant requireActiveTenant(UUID tenantId) {
+        Tenant tenant = tenantRepository.findById(tenantId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, INVITE_INVALID));
+        if (!tenant.isActive()) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, TENANT_INACTIVE);
+        }
+        return tenant;
+    }
+
+    private String acceptLink(String token) {
+        String base = inviteProperties.appBaseUrl().replaceAll("/+$", "");
+        return base + "/invites/accept?token=" + URLEncoder.encode(token, StandardCharsets.UTF_8);
+    }
+
+    private static String displayRole(MembershipRole role) {
+        String name = role.name().toLowerCase(Locale.ROOT);
+        return Character.toUpperCase(name.charAt(0)) + name.substring(1);
     }
 
     private static UUID currentTenantId() {

@@ -30,6 +30,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.redis.testcontainers.RedisContainer;
 import com.saas.foundation.domain.tenant.Tenant;
+import com.saas.foundation.integration.email.SimulatedEmailProviderClient;
 import com.saas.foundation.domain.tenant.TenantRepository;
 import com.saas.foundation.domain.user.MembershipRole;
 import com.saas.foundation.domain.user.TenantMembership;
@@ -77,11 +78,15 @@ class MembershipIT {
     @Autowired
     TenantMembershipRepository tenantMembershipRepository;
 
+    @Autowired
+    SimulatedEmailProviderClient emailClient;
+
     @Test
     void ownerCanInviteChangeRoleAndRemove() throws Exception {
         Account owner = account("owner");
         Account guest = account("guest");
         String ownerToken = login(owner.email(), null);
+        emailClient.clearSent();
 
         mockMvc.perform(post("/api/v1/members")
                         .header(HttpHeaders.AUTHORIZATION, bearer(ownerToken))
@@ -93,6 +98,22 @@ class MembershipIT {
                 .andExpect(jsonPath("$.userId").value(guest.userId().toString()))
                 .andExpect(jsonPath("$.role").value("MEMBER"))
                 .andExpect(jsonPath("$.emailAccepted").value(true));
+
+        mockMvc.perform(get("/api/v1/members")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(ownerToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1));
+
+        String guestToken = login(guest.email(), null);
+        mockMvc.perform(post("/api/v1/membership-invites/accept")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(guestToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"token":"%s"}
+                                """.formatted(tokenFromLatestEmail())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.tenantId").value(owner.tenantId().toString()))
+                .andExpect(jsonPath("$.role").value("MEMBER"));
 
         mockMvc.perform(post("/api/v1/members")
                         .header(HttpHeaders.AUTHORIZATION, bearer(ownerToken))
@@ -195,6 +216,13 @@ class MembershipIT {
         UserAccount user = userAccountRepository.save(new UserAccount(email, passwordEncoder.encode(PASSWORD)));
         tenantMembershipRepository.save(new TenantMembership(tenant.getId(), user.getId(), MembershipRole.OWNER));
         return new Account(tenant.getId(), user.getId(), email);
+    }
+
+    private String tokenFromLatestEmail() {
+        String body = emailClient.sentMessages().getLast().body();
+        String prefix = "token=";
+        int start = body.indexOf(prefix);
+        return body.substring(start + prefix.length()).split("\\s")[0];
     }
 
     private String login(String email, UUID tenantId) throws Exception {

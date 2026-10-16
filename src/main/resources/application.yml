@@ -214,6 +214,9 @@ saas:
     password-reset:
       ttl: 30m
       app-base-url: ${APP_BASE_URL:http://localhost:5173}
+    membership-invite:
+      ttl: 7d
+      app-base-url: ${APP_BASE_URL:http://localhost:5173}
 
 logging:
   level:

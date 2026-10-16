@@ -9,6 +9,7 @@ public record TokenResponse(
         Instant expiresAt,
         String refreshToken,
         Instant refreshTokenExpiresAt,
-        UUID tenantId
+        UUID tenantId,
+        String organizationName
 ) {
 }

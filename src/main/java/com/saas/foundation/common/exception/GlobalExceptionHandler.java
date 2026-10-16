@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.server.ResponseStatusException;
 
+import com.saas.foundation.auth.OrganizationChoiceRequiredException;
 import com.saas.foundation.ratelimit.RateLimitExceededException;
 import com.saas.foundation.tenant.exception.InvalidTenantException;
 import com.saas.foundation.tenant.exception.MissingTenantException;
@@ -73,6 +74,13 @@ public class GlobalExceptionHandler {
                 violations
         );
         return ResponseEntity.badRequest().body(body);
+    }
+
+    @ExceptionHandler(OrganizationChoiceRequiredException.class)
+    public ResponseEntity<ApiError> handleOrganizationChoice(OrganizationChoiceRequiredException ex,
+                                                             HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ApiError.organizationChoice(ex.getMessage(), request.getRequestURI(), ex.getOrganizations()));
     }
 
     @ExceptionHandler(ResponseStatusException.class)

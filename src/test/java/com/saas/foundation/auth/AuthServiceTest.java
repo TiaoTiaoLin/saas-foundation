@@ -2,6 +2,7 @@ package com.saas.foundation.auth;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
@@ -94,6 +95,7 @@ class AuthServiceTest {
         TokenResponse response = authService.login(new LoginRequest(EMAIL, PASSWORD, null));
 
         assertThat(response.tenantId()).isEqualTo(tenantId);
+        assertThat(response.organizationName()).isEqualTo("Acme");
         assertThat(response.tokenType()).isEqualTo("Bearer");
         Jwt jwt = jwtDecoder.decode(response.accessToken());
         assertThat(jwt.getSubject()).isEqualTo(user.getId().toString());
@@ -162,11 +164,18 @@ class AuthServiceTest {
     }
 
     @Test
-    void multipleMembershipsRequireTenantId() {
+    void multipleActiveMembershipsAskForAnOrganization() {
         UUID first = givenMembership(MembershipRole.OWNER, TenantStatus.ACTIVE);
         UUID second = givenAdditionalMembership(first, MembershipRole.MEMBER);
 
-        assertStatus(() -> authService.login(new LoginRequest(EMAIL, PASSWORD, null)), HttpStatus.BAD_REQUEST);
+        assertStatus(() -> authService.login(new LoginRequest(EMAIL, "wrong", null)), HttpStatus.UNAUTHORIZED);
+        assertThatThrownBy(() -> authService.login(new LoginRequest(EMAIL, PASSWORD, null)))
+                .isInstanceOfSatisfying(OrganizationChoiceRequiredException.class, ex ->
+                        assertThat(ex.getOrganizations())
+                                .extracting(LoginOrganization::name, LoginOrganization::tenantId)
+                                .containsExactly(
+                                        tuple("Acme", first),
+                                        tuple("Globex", second)));
 
         TokenResponse response = authService.login(new LoginRequest(EMAIL, PASSWORD, second));
         assertThat(response.tenantId()).isEqualTo(second);

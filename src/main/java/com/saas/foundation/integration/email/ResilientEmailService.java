@@ -39,11 +39,20 @@ public class ResilientEmailService {
 
     @CircuitBreaker(name = RESILIENCE_NAME, fallbackMethod = "sendInviteFallback")
     @Retry(name = RESILIENCE_NAME)
-    public EmailSendResult sendMembershipInvite(String tenantId, String recipientEmail, String role) {
+    public EmailSendResult sendMembershipInvite(String recipientEmail, String organizationName,
+                                                String role, String acceptUrl) {
         EmailMessage message = new EmailMessage(
                 recipientEmail,
-                "You were added to a tenant",
-                "You were added to tenant " + tenantId + " as " + role + "."
+                "Invitation to " + organizationName,
+                """
+                You were invited to join %s as %s.
+
+                Open this link to accept. It expires soon.
+
+                %s
+
+                If you do not want to join, you can ignore this email.
+                """.formatted(organizationName, role, acceptUrl)
         );
         return emailProviderClient.send(message);
     }
@@ -73,9 +82,10 @@ public class ResilientEmailService {
     }
 
     @SuppressWarnings("unused")
-    private EmailSendResult sendInviteFallback(String tenantId, String recipientEmail, String role, Throwable cause) {
-        log.error("Invite email fallback engaged tenantId={} to={} role={} cause={}",
-                tenantId, recipientEmail, role, cause.toString());
+    private EmailSendResult sendInviteFallback(String recipientEmail, String organizationName, String role,
+                                               String acceptUrl, Throwable cause) {
+        log.error("Invite email fallback engaged organization={} to={} role={} cause={}",
+                organizationName, recipientEmail, role, cause.toString());
         return EmailSendResult.fallback("queued-for-retry:" + cause.getClass().getSimpleName());
     }
 

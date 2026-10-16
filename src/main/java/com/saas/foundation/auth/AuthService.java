@@ -1,6 +1,7 @@
 package com.saas.foundation.auth;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -212,13 +213,17 @@ public class AuthService {
                                         IssuedRefreshToken refreshToken) {
         IssuedToken accessToken = jwtTokenService.issueAccessToken(
                 user.getId(), membership.getTenantId(), List.of(membership.getRole().name()));
+        String organizationName = tenantRepository.findById(membership.getTenantId())
+                .map(Tenant::getName)
+                .orElse("Organization");
         return new TokenResponse(
                 accessToken.value(),
                 "Bearer",
                 accessToken.expiresAt(),
                 refreshToken.value(),
                 refreshToken.expiresAt(),
-                membership.getTenantId());
+                membership.getTenantId(),
+                organizationName);
     }
 
     private UserAccount authenticate(String email, String password) {
@@ -253,11 +258,30 @@ public class AuthService {
         if (memberships.isEmpty()) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "User does not belong to any tenant");
         }
-        if (memberships.size() > 1) {
-            throw new ResponseStatusException(
-                    HttpStatus.BAD_REQUEST, "tenantId is required: user belongs to multiple tenants");
+        List<TenantMembership> active = memberships.stream()
+                .filter(membership -> isActive(membership.getTenantId()))
+                .toList();
+        if (active.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Tenant is not active");
         }
-        return memberships.get(0);
+        if (active.size() == 1) {
+            return active.get(0);
+        }
+        throw new OrganizationChoiceRequiredException(active.stream()
+                .map(this::toLoginOrganization)
+                .sorted(Comparator.comparing(LoginOrganization::name, String.CASE_INSENSITIVE_ORDER))
+                .toList());
+    }
+
+    private boolean isActive(UUID tenantId) {
+        return tenantRepository.findById(tenantId).map(Tenant::isActive).orElse(false);
+    }
+
+    private LoginOrganization toLoginOrganization(TenantMembership membership) {
+        String name = tenantRepository.findById(membership.getTenantId())
+                .map(Tenant::getName)
+                .orElse("Organization");
+        return new LoginOrganization(membership.getTenantId(), name, membership.getRole());
     }
 
     private void requireActiveTenant(UUID tenantId) {
