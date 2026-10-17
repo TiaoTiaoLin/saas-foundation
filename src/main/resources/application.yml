@@ -4,8 +4,6 @@ spring:
 
   datasource:
     url: jdbc:postgresql://localhost:5432/saas_foundation
-    username: saas_app
-    password: saas_app
     hikari:
       maximum-pool-size: 20
       minimum-idle: 5
@@ -30,8 +28,6 @@ spring:
   flyway:
     enabled: true
     locations: classpath:db/migration
-    user: saas
-    password: saas
     url: jdbc:postgresql://localhost:5432/saas_foundation
     baseline-on-migrate: true
 
@@ -242,3 +238,15 @@ saas:
 logging:
   level:
     com.saas.foundation: DEBUG
+
+---
+spring:
+  config:
+    activate:
+      on-profile: "!prod"
+  datasource:
+    username: saas_app
+    password: saas_app
+  flyway:
+    user: saas
+    password: saas
