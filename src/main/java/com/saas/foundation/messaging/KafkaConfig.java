@@ -17,6 +17,7 @@ import org.springframework.kafka.config.TopicBuilder;
 import org.springframework.kafka.core.ConsumerFactory;
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
 import org.springframework.kafka.core.DefaultKafkaProducerFactory;
+import org.springframework.kafka.core.KafkaAdmin;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.core.ProducerFactory;
 import org.springframework.kafka.support.serializer.JsonDeserializer;
@@ -38,8 +39,15 @@ public class KafkaConfig {
     }
 
     @Bean
+    public KafkaAdmin kafkaAdmin(KafkaProperties kafkaProperties) {
+        normalizePemTruststore(kafkaProperties);
+        return new KafkaAdmin(kafkaProperties.buildAdminProperties(null));
+    }
+
+    @Bean
     public ProducerFactory<String, TenantRegisteredEvent> tenantRegisteredProducerFactory(
             KafkaProperties kafkaProperties) {
+        normalizePemTruststore(kafkaProperties);
         Map<String, Object> props = new HashMap<>(kafkaProperties.buildProducerProperties(null));
         props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
         props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, JsonSerializer.class);
@@ -58,6 +66,7 @@ public class KafkaConfig {
     @Bean
     public ConsumerFactory<String, TenantRegisteredEvent> tenantRegisteredConsumerFactory(
             KafkaProperties kafkaProperties) {
+        normalizePemTruststore(kafkaProperties);
         Map<String, Object> props = new HashMap<>(kafkaProperties.buildConsumerProperties(null));
         props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, ErrorHandlingDeserializer.class);
         props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ErrorHandlingDeserializer.class);
@@ -80,5 +89,18 @@ public class KafkaConfig {
         factory.getContainerProperties().setAckMode(
                 org.springframework.kafka.listener.ContainerProperties.AckMode.RECORD);
         return factory;
+    }
+
+    /**
+     * Render env values often store the PEM as one line with literal "\n".
+     * Kafka's PEM parser needs real line breaks.
+     */
+    private static void normalizePemTruststore(KafkaProperties kafkaProperties) {
+        String certificates = kafkaProperties.getProperties().get("ssl.truststore.certificates");
+        if (certificates == null || certificates.isBlank()) {
+            return;
+        }
+        String pem = certificates.replace("\\r\\n", "\n").replace("\\n", "\n").trim();
+        kafkaProperties.getProperties().put("ssl.truststore.certificates", pem);
     }
 }
