@@ -9,9 +9,12 @@ import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.multipart.support.MissingServletRequestPartException;
 import org.springframework.web.server.ResponseStatusException;
 
 import com.saas.foundation.auth.OrganizationChoiceRequiredException;
+import com.saas.foundation.storage.ImageFiles;
 import com.saas.foundation.ratelimit.RateLimitExceededException;
 import com.saas.foundation.tenant.exception.InvalidTenantException;
 import com.saas.foundation.tenant.exception.MissingTenantException;
@@ -58,6 +61,17 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiError> handleAccessDenied(AccessDeniedException ex, HttpServletRequest request) {
         log.debug("Access denied on {}: {}", request.getRequestURI(), ex.getMessage());
         return build(HttpStatus.FORBIDDEN, "Access denied", request.getRequestURI());
+    }
+
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<ApiError> handleUploadTooLarge(MaxUploadSizeExceededException ex, HttpServletRequest request) {
+        return build(HttpStatus.BAD_REQUEST, ImageFiles.TOO_LARGE, request.getRequestURI());
+    }
+
+    @ExceptionHandler(MissingServletRequestPartException.class)
+    public ResponseEntity<ApiError> handleMissingUpload(MissingServletRequestPartException ex,
+                                                        HttpServletRequest request) {
+        return build(HttpStatus.BAD_REQUEST, "Choose an image", request.getRequestURI());
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

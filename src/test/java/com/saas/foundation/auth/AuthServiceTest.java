@@ -47,6 +47,7 @@ import com.saas.foundation.security.JwtConfig;
 import com.saas.foundation.security.JwtProperties;
 import com.saas.foundation.security.JwtTokenService;
 import com.saas.foundation.security.RefreshTokenProperties;
+import com.saas.foundation.storage.MemoryObjectStorage;
 
 class AuthServiceTest {
 
@@ -63,6 +64,8 @@ class AuthServiceTest {
     private final TenantMembershipRepository memberships = mock(TenantMembershipRepository.class);
     private final TenantRepository tenants = mock(TenantRepository.class);
     private final EntityManager entityManager = mock(EntityManager.class);
+    private final MemoryObjectStorage images = new MemoryObjectStorage();
+    private Tenant currentTenant;
     private final Map<String, RefreshToken> refreshTokensByHash = new ConcurrentHashMap<>();
     private final RefreshTokenRepository refreshTokens = inMemoryRefreshTokens(refreshTokensByHash);
 
@@ -340,12 +343,20 @@ class AuthServiceTest {
         UUID tenantId = givenMembership(MembershipRole.OWNER, TenantStatus.ACTIVE);
         when(memberships.findByTenantIdForUpdate(tenantId)).thenReturn(List.of(
                 new TenantMembership(tenantId, user.getId(), MembershipRole.OWNER)));
+        String avatarKey = "avatars/" + user.getId() + "/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa.jpg";
+        String logoKey = "logos/" + tenantId + "/bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb.jpg";
+        user.setAvatarKey(avatarKey);
+        currentTenant.setLogoKey(logoKey);
+        images.put(avatarKey, new byte[] {1});
+        images.put(logoKey, new byte[] {2});
         TokenResponse login = authService.login(new LoginRequest(EMAIL, PASSWORD, null));
 
         authService.deleteAccount(user.getId(), PASSWORD);
 
         verify(tenants).deleteById(tenantId);
         verify(users).deleteById(user.getId());
+        assertThat(images.contains(avatarKey)).isFalse();
+        assertThat(images.contains(logoKey)).isFalse();
         verify(entityManager).createNativeQuery("DELETE FROM products WHERE tenant_id = CAST(:tenantId AS uuid)");
         assertStatus(() -> authService.refresh(login.refreshToken()), HttpStatus.UNAUTHORIZED);
     }
@@ -483,11 +494,12 @@ class AuthServiceTest {
         RefreshTokenService refreshTokenService =
                 new RefreshTokenService(refreshTokens, new RefreshTokenProperties(refreshTtl));
         return new AuthService(users, memberships, tenants, passwordEncoder, tokenService, refreshTokenService,
-                entityManager);
+                entityManager, images);
     }
 
     private UUID givenMembership(MembershipRole role, TenantStatus status) {
         Tenant tenant = withId(new Tenant("Acme"));
+        currentTenant = tenant;
         tenant.setStatus(status);
         TenantMembership membership = new TenantMembership(tenant.getId(), user.getId(), role);
         when(tenants.findById(tenant.getId())).thenReturn(Optional.of(tenant));

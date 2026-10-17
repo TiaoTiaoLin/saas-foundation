@@ -27,6 +27,10 @@ public class UserAccount extends AuditedEntity {
     @Column(nullable = false)
     private boolean enabled = true;
 
+    /** Path inside the private image bucket. Empty means no avatar. */
+    @Column(name = "avatar_key", length = 160)
+    private String avatarKey;
+
     /** Required by JPA. */
     public UserAccount() {
     }

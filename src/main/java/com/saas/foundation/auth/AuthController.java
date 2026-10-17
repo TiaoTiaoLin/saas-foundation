@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.UUID;
 
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -16,11 +17,14 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 import com.saas.foundation.ratelimit.AuthRateLimiter;
 import com.saas.foundation.security.JwtTokenService;
+import com.saas.foundation.storage.ImageUploads;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -74,6 +78,18 @@ public class AuthController {
     @PreAuthorize("isAuthenticated()")
     public ProfileResponse updateProfile(@Valid @RequestBody UpdateProfileRequest request) {
         return profileService.update(currentUserId(), request.name());
+    }
+
+    @PutMapping(value = "/profile/avatar", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PreAuthorize("isAuthenticated()")
+    public ProfileResponse saveAvatar(@RequestParam("file") MultipartFile file) {
+        return profileService.saveAvatar(currentUserId(), ImageUploads.bytes(file));
+    }
+
+    @DeleteMapping("/profile/avatar")
+    @PreAuthorize("isAuthenticated()")
+    public ProfileResponse clearAvatar() {
+        return profileService.clearAvatar(currentUserId());
     }
 
     @GetMapping("/organizations")

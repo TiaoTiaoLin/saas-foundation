@@ -25,6 +25,7 @@ import com.saas.foundation.domain.user.UserAccountRepository;
 import com.saas.foundation.security.JwtTokenService;
 import com.saas.foundation.security.JwtTokenService.IssuedToken;
 import com.saas.foundation.security.PasswordConfig;
+import com.saas.foundation.storage.ObjectStorage;
 
 import jakarta.persistence.EntityManager;
 import lombok.extern.slf4j.Slf4j;
@@ -45,6 +46,7 @@ public class AuthService {
     private final JwtTokenService jwtTokenService;
     private final RefreshTokenService refreshTokenService;
     private final EntityManager entityManager;
+    private final ObjectStorage objectStorage;
 
     /** Compared against when the email is unknown, so response time does not reveal which emails exist. */
     private final String dummyPasswordHash;
@@ -55,7 +57,8 @@ public class AuthService {
                        PasswordEncoder passwordEncoder,
                        JwtTokenService jwtTokenService,
                        RefreshTokenService refreshTokenService,
-                       EntityManager entityManager) {
+                       EntityManager entityManager,
+                       ObjectStorage objectStorage) {
         this.userAccountRepository = userAccountRepository;
         this.tenantMembershipRepository = tenantMembershipRepository;
         this.tenantRepository = tenantRepository;
@@ -63,6 +66,7 @@ public class AuthService {
         this.jwtTokenService = jwtTokenService;
         this.refreshTokenService = refreshTokenService;
         this.entityManager = entityManager;
+        this.objectStorage = objectStorage;
         this.dummyPasswordHash = passwordEncoder.encode("dummy-password-for-unknown-users");
     }
 
@@ -218,6 +222,15 @@ public class AuthService {
             }
         }
 
+        String avatarKey = blankToNull(user.getAvatarKey());
+        List<String> logoKeys = new ArrayList<>();
+        for (UUID tenantId : soleMemberTenants) {
+            tenantRepository.findById(tenantId)
+                    .map(Tenant::getLogoKey)
+                    .map(AuthService::blankToNull)
+                    .ifPresent(logoKeys::add);
+        }
+
         refreshTokenService.revokeAllForUser(userId);
         for (UUID tenantId : soleMemberTenants) {
             deleteSoleMemberTenant(tenantId);
@@ -229,6 +242,8 @@ public class AuthService {
         } else {
             userAccountRepository.delete(user);
         }
+        deleteImage(avatarKey);
+        logoKeys.forEach(this::deleteImage);
         log.info("Account deleted userId={}", userId);
     }
 
@@ -247,6 +262,21 @@ public class AuthService {
                 .executeUpdate();
         tenantRepository.deleteById(tenantId);
         entityManager.flush();
+    }
+
+    private void deleteImage(String key) {
+        if (key == null) {
+            return;
+        }
+        try {
+            objectStorage.delete(key);
+        } catch (RuntimeException ex) {
+            log.warn("Could not delete image key={}: {}", key, ex.toString());
+        }
+    }
+
+    private static String blankToNull(String key) {
+        return key == null || key.isBlank() ? null : key;
     }
 
     private static long ownerCount(List<TenantMembership> memberships) {

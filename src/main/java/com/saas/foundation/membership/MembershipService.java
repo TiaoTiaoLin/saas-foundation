@@ -33,12 +33,13 @@ import com.saas.foundation.integration.email.EmailSendResult;
 import com.saas.foundation.integration.email.ResilientEmailService;
 import com.saas.foundation.security.Hashing;
 import com.saas.foundation.security.MembershipInviteProperties;
+import com.saas.foundation.storage.ObjectStorage;
 import com.saas.foundation.tenant.TenantContext;
 
 @Service
 public class MembershipService {
 
-    static final String OWNER_REQUIRED = "Owner role is required";
+    public static final String OWNER_REQUIRED = "Owner role is required";
     static final String KEEP_OWNER = "Tenant must keep an owner";
     static final String ALREADY_MEMBER = "User is already a member of this tenant";
     static final String UNKNOWN_EMAIL = "No account with this email";
@@ -57,6 +58,7 @@ public class MembershipService {
     private final RefreshTokenRepository refreshTokenRepository;
     private final ResilientEmailService resilientEmailService;
     private final MembershipInviteProperties inviteProperties;
+    private final ObjectStorage objectStorage;
 
     public MembershipService(UserAccountRepository userAccountRepository,
                              TenantMembershipRepository tenantMembershipRepository,
@@ -64,7 +66,8 @@ public class MembershipService {
                              TenantRepository tenantRepository,
                              RefreshTokenRepository refreshTokenRepository,
                              ResilientEmailService resilientEmailService,
-                             MembershipInviteProperties inviteProperties) {
+                             MembershipInviteProperties inviteProperties,
+                             ObjectStorage objectStorage) {
         this.userAccountRepository = userAccountRepository;
         this.tenantMembershipRepository = tenantMembershipRepository;
         this.membershipInviteRepository = membershipInviteRepository;
@@ -72,6 +75,7 @@ public class MembershipService {
         this.refreshTokenRepository = refreshTokenRepository;
         this.resilientEmailService = resilientEmailService;
         this.inviteProperties = inviteProperties;
+        this.objectStorage = objectStorage;
     }
 
     @Transactional(readOnly = true)
@@ -86,9 +90,17 @@ public class MembershipService {
         Map<UUID, UserAccount> users = userAccountRepository.findAllById(
                         memberships.stream().map(TenantMembership::getUserId).toList()).stream()
                 .collect(Collectors.toMap(UserAccount::getId, Function.identity()));
+        Map<String, String> avatarUrls = objectStorage.signedUrls(users.values().stream()
+                .map(UserAccount::getAvatarKey)
+                .filter(key -> key != null && !key.isBlank())
+                .toList());
 
         return memberships.stream()
-                .map(membership -> toResponse(membership, users.get(membership.getUserId())))
+                .map(membership -> {
+                    UserAccount user = users.get(membership.getUserId());
+                    String avatarUrl = user.getAvatarKey() == null ? null : avatarUrls.get(user.getAvatarKey());
+                    return toResponse(membership, user, avatarUrl);
+                })
                 .sorted(Comparator.comparing(MemberResponse::email, String.CASE_INSENSITIVE_ORDER))
                 .toList();
     }
@@ -221,8 +233,13 @@ public class MembershipService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, MEMBER_NOT_FOUND));
     }
 
-    private static MemberResponse toResponse(TenantMembership membership, UserAccount user) {
-        return new MemberResponse(membership.getUserId(), user.getEmail(), user.getName(), membership.getRole());
+    private MemberResponse toResponse(TenantMembership membership, UserAccount user) {
+        return toResponse(membership, user, objectStorage.signedUrl(user.getAvatarKey()));
+    }
+
+    private static MemberResponse toResponse(TenantMembership membership, UserAccount user, String avatarUrl) {
+        return new MemberResponse(
+                membership.getUserId(), user.getEmail(), user.getName(), membership.getRole(), avatarUrl);
     }
 
     private static long ownerCount(List<TenantMembership> memberships) {

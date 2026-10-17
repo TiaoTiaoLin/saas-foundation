@@ -120,6 +120,13 @@
             <artifactId>opentelemetry-exporter-otlp</artifactId>
         </dependency> -->
 
+        <!-- WebP decoding for avatar and logo uploads. JPEG output uses the JDK. -->
+        <dependency>
+            <groupId>com.twelvemonkeys.imageio</groupId>
+            <artifactId>imageio-webp</artifactId>
+            <version>3.12.0</version>
+        </dependency>
+
         <!-- Resend -->
         <dependency>
             <groupId>com.resend</groupId>

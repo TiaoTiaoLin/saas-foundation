@@ -37,6 +37,7 @@ import com.saas.foundation.domain.user.TenantMembershipRepository;
 import com.saas.foundation.domain.user.UserAccount;
 import com.saas.foundation.domain.user.UserAccountRepository;
 import com.saas.foundation.integration.email.EmailProviderClient;
+import com.saas.foundation.storage.MemoryObjectStorage;
 import com.saas.foundation.integration.email.EmailSendResult;
 import com.saas.foundation.integration.email.ResilientEmailService;
 import com.saas.foundation.security.Hashing;
@@ -78,7 +79,8 @@ class MembershipServiceTest {
                 tenants,
                 refreshTokens,
                 email,
-                new MembershipInviteProperties(Duration.ofDays(7), "http://localhost:5173"));
+                new MembershipInviteProperties(Duration.ofDays(7), "http://localhost:5173"),
+                new MemoryObjectStorage());
         tenantId = UUID.randomUUID();
         TenantContext.setTenantId(tenantId.toString());
         owner = user("owner@acme.test");

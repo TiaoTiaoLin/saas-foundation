@@ -25,6 +25,10 @@ public class Tenant extends AuditedEntity {
     @Column(nullable = false, length = 16)
     private TenantStatus status = TenantStatus.ACTIVE;
 
+    /** Path inside the private image bucket. Empty means no logo. */
+    @Column(name = "logo_key", length = 160)
+    private String logoKey;
+
     /** Required by JPA. */
     public Tenant() {
     }
