@@ -39,7 +39,7 @@ spec:
               protocol: TCP
           env:
             - name: SPRING_PROFILES_ACTIVE
-              value: "default"
+              value: "prod"
             - name: JAVA_OPTS
               value: "-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0"
             - name: SPRING_DATASOURCE_URL

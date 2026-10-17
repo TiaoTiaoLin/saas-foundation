@@ -20,8 +20,12 @@ spring:
 
 server:
   port: ${SERVER_PORT:8080}
+  forward-headers-strategy: framework
 
 saas:
+  cors:
+    allowed-origins:
+      - ${WEB_ORIGIN}
   integrations:
     email:
       api-key: ${RESEND_API_KEY}
