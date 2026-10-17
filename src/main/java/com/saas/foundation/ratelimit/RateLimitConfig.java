@@ -26,6 +26,7 @@ public class RateLimitConfig {
         RedisURI.Builder builder = RedisURI.builder()
                 .withHost(redisProperties.getHost())
                 .withPort(redisProperties.getPort())
+                .withSsl(true)
                 .withTimeout(redisProperties.getTimeout() != null
                         ? redisProperties.getTimeout()
                         : Duration.ofSeconds(2));
