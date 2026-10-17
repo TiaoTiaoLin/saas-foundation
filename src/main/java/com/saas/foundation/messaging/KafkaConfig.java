@@ -33,8 +33,8 @@ public class KafkaConfig {
     @Bean
     public NewTopic tenantRegisteredTopic(KafkaTopicsProperties topics) {
         return TopicBuilder.name(topics.tenantRegisteredTopic())
-                .partitions(3)
-                .replicas(1)
+                .partitions(2)
+                .replicas(2)
                 .build();
     }
 
