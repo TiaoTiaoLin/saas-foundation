@@ -2,6 +2,7 @@ package com.saas.foundation.ratelimit;
 
 import java.time.Duration;
 
+import org.springframework.boot.autoconfigure.data.redis.ClientResourcesBuilderCustomizer;
 import org.springframework.boot.autoconfigure.data.redis.RedisProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -17,25 +18,42 @@ import io.lettuce.core.api.StatefulRedisConnection;
 import io.lettuce.core.codec.ByteArrayCodec;
 import io.lettuce.core.codec.RedisCodec;
 import io.lettuce.core.codec.StringCodec;
+import io.lettuce.core.resource.ClientResources;
+import io.netty.resolver.DefaultAddressResolverGroup;
 
 @Configuration
 public class RateLimitConfig {
 
+    /**
+     * Lettuce's Netty DNS resolver fails on Alpine (the Render image) and reports the
+     * host as {@code <unresolved>}. The JVM resolver uses the container DNS config.
+     */
+    @Bean
+    ClientResourcesBuilderCustomizer lettuceJvmDnsResolver() {
+        return builder -> builder.addressResolverGroup(DefaultAddressResolverGroup.INSTANCE);
+    }
+
     @Bean(destroyMethod = "shutdown")
-    public RedisClient bucket4jRedisClient(RedisProperties redisProperties) {
+    public RedisClient bucket4jRedisClient(RedisProperties redisProperties, ClientResources clientResources) {
         RedisURI.Builder builder = RedisURI.builder()
                 .withHost(redisProperties.getHost())
                 .withPort(redisProperties.getPort())
-                .withSsl(true)
                 .withTimeout(redisProperties.getTimeout() != null
                         ? redisProperties.getTimeout()
                         : Duration.ofSeconds(2));
 
-        if (redisProperties.getPassword() != null && !redisProperties.getPassword().isBlank()) {
-            builder.withPassword(redisProperties.getPassword().toCharArray());
+        if (redisProperties.getSsl().isEnabled()) {
+            builder.withSsl(true);
+        }
+        String password = redisProperties.getPassword();
+        String username = redisProperties.getUsername();
+        if (username != null && !username.isBlank() && password != null && !password.isBlank()) {
+            builder.withAuthentication(username, password);
+        } else if (password != null && !password.isBlank()) {
+            builder.withPassword(password.toCharArray());
         }
         builder.withDatabase(redisProperties.getDatabase());
-        return RedisClient.create(builder.build());
+        return RedisClient.create(clientResources, builder.build());
     }
 
     @Bean(destroyMethod = "close")
