@@ -1,13 +1,9 @@
 spring:
   datasource:
     url: ${DB_URL}
-    user: ${DB_USERNAME}
-    password: ${DB_PASSWORD}
 
   flyway:
     url: ${DB_URL}
-    user: ${DB_MIGRATION_USERNAME}
-    password: ${DB_MIGRATION_PASSWORD}
 
   data:
     redis:
