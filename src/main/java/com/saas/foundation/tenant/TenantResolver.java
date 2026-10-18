@@ -6,5 +6,9 @@ package com.saas.foundation.tenant;
  */
 public interface TenantResolver {
 
+    /** The organization exists and has not been suspended. */
     boolean isActive(String tenantId);
+
+    /** Product routes are open only while the subscription is active. */
+    boolean allowsProductAccess(String tenantId);
 }

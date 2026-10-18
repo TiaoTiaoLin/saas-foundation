@@ -24,6 +24,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import com.saas.foundation.domain.tenant.SubscriptionStatus;
 import com.saas.foundation.domain.tenant.Tenant;
 import com.saas.foundation.domain.tenant.TenantRepository;
 import com.saas.foundation.domain.tenant.TenantSaved;
@@ -88,12 +89,44 @@ class CachingTenantResolverTest {
     }
 
     @Test
+    void noSubscriptionBlocksProductAccess() {
+        when(tenants.findById(tenantId)).thenReturn(Optional.of(tenant(TenantStatus.ACTIVE)));
+
+        assertThat(resolver.isActive(tenantId.toString())).isTrue();
+        assertThat(resolver.allowsProductAccess(tenantId.toString())).isFalse();
+        assertThat(redis.values).containsEntry(PREFIX + "products:" + tenantId, "false");
+    }
+
+    @Test
+    void anActiveSubscriptionOpensProductAccess() {
+        Tenant subscribed = tenant(TenantStatus.ACTIVE);
+        subscribed.setSubscriptionStatus(SubscriptionStatus.ACTIVE);
+        when(tenants.findById(tenantId)).thenReturn(Optional.of(subscribed));
+
+        assertThat(resolver.allowsProductAccess(tenantId.toString())).isTrue();
+        assertThat(redis.values).containsEntry(PREFIX + "products:" + tenantId, "true");
+    }
+
+    @Test
+    void aCanceledSubscriptionBlocksProductAccess() {
+        Tenant canceled = tenant(TenantStatus.ACTIVE);
+        canceled.setSubscriptionStatus(SubscriptionStatus.CANCELED);
+        when(tenants.findById(tenantId)).thenReturn(Optional.of(canceled));
+
+        assertThat(resolver.isActive(tenantId.toString())).isTrue();
+        assertThat(resolver.allowsProductAccess(tenantId.toString())).isFalse();
+        assertThat(redis.values).containsEntry(PREFIX + "products:" + tenantId, "false");
+    }
+
+    @Test
     void savingATenantDeletesTheCachedFlag() {
         redis.values.put(PREFIX + tenantId, "true");
+        redis.values.put(PREFIX + "products:" + tenantId, "true");
 
         resolver.onTenantSaved(new TenantSaved(tenantId));
 
         assertThat(redis.values).doesNotContainKey(PREFIX + tenantId);
+        assertThat(redis.values).doesNotContainKey(PREFIX + "products:" + tenantId);
     }
 
     private Tenant tenant(TenantStatus status) {

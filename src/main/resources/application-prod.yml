@@ -47,6 +47,11 @@ saas:
     url: ${SUPABASE_URL}
     bucket: ${SUPABASE_BUCKET:images}
     service-role-key: ${SUPABASE_SERVICE_ROLE_KEY}
+  billing:
+    secret-key: ${STRIPE_SECRET_KEY}
+    webhook-secret: ${STRIPE_WEBHOOK_SECRET}
+    price-id: ${STRIPE_PRICE_ID}
+    app-base-url: ${APP_BASE_URL}
 
 management:
   tracing:

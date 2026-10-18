@@ -165,6 +165,7 @@ saas:
       - /api/v1/auth/**
       - /api/v1/tenants/registrations
       - /api/v1/media
+      - /api/v1/billing/webhook
   rate-limit:
     enabled: true
     capacity: 100
@@ -223,6 +224,11 @@ saas:
     signed-url-ttl: 1h
     local-directory: ${java.io.tmpdir}/saas-foundation-images
     signing-secret: local-dev-only-media-signing-secret-32b
+  billing:
+    secret-key: ${STRIPE_SECRET_KEY:}
+    webhook-secret: ${STRIPE_WEBHOOK_SECRET:}
+    price-id: ${STRIPE_PRICE_ID:}
+    app-base-url: ${APP_BASE_URL:http://localhost:5173}
 
 logging:
   level:

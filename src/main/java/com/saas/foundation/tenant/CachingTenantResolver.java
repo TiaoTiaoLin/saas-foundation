@@ -7,15 +7,15 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
 
-import com.saas.foundation.domain.tenant.Tenant;
 import com.saas.foundation.domain.tenant.TenantRepository;
 import com.saas.foundation.domain.tenant.TenantSaved;
 
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * Tenant status from Redis, loaded from Postgres when the key is missing or Redis is down.
- * Entries expire after {@code saas.tenancy.active-cache-ttl}. Saving a tenant drops the key
+ * Tenant status and product access, cached in Redis and loaded from Postgres when a key is missing.
+ * Product routes are open only while the organization is active and its subscription is active.
+ * Entries expire after {@code saas.tenancy.active-cache-ttl}. Saving a tenant drops both keys
  * once that transaction commits, so a status change is visible on the next request.
  */
 @Slf4j
@@ -39,30 +39,42 @@ public class CachingTenantResolver implements TenantResolver {
 
     @Override
     public boolean isActive(String tenantId) {
-        if (tenantId == null || tenantId.isBlank()) {
-            return false;
-        }
+        return readFlag(tenantId, cacheKey(tenantId), true);
+    }
 
-        String key = cacheKey(tenantId);
-        Boolean cached = readCache(key);
-        if (cached != null) {
-            return cached;
-        }
-
-        boolean active = loadActive(tenantId);
-        writeCache(key, active);
-        return active;
+    @Override
+    public boolean allowsProductAccess(String tenantId) {
+        return readFlag(tenantId, productCacheKey(tenantId), false);
     }
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
     public void onTenantSaved(TenantSaved event) {
-        deleteQuietly(cacheKey(event.tenantId().toString()));
+        String tenantId = event.tenantId().toString();
+        deleteQuietly(cacheKey(tenantId));
+        deleteQuietly(productCacheKey(tenantId));
     }
 
-    private boolean loadActive(String tenantId) {
+    private boolean readFlag(String tenantId, String key, boolean organizationActive) {
+        if (tenantId == null || tenantId.isBlank()) {
+            return false;
+        }
+        Boolean cached = readCache(key);
+        if (cached != null) {
+            return cached;
+        }
+        Access access = loadAccess(tenantId);
+        writeCache(cacheKey(tenantId), access.active());
+        writeCache(productCacheKey(tenantId), access.products());
+        return organizationActive ? access.active() : access.products();
+    }
+
+    private Access loadAccess(String tenantId) {
         return tenantRepository.findById(UUID.fromString(tenantId))
-                .map(Tenant::isActive)
-                .orElse(false);
+                .map(tenant -> new Access(tenant.isActive(), tenant.allowsProductAccess()))
+                .orElse(new Access(false, false));
+    }
+
+    private record Access(boolean active, boolean products) {
     }
 
     private Boolean readCache(String key) {
@@ -99,5 +111,9 @@ public class CachingTenantResolver implements TenantResolver {
 
     private String cacheKey(String tenantId) {
         return properties.activeCacheKeyPrefix() + tenantId;
+    }
+
+    private String productCacheKey(String tenantId) {
+        return properties.activeCacheKeyPrefix() + "products:" + tenantId;
     }
 }

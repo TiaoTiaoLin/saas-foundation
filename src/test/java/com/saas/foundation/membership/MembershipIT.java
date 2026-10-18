@@ -29,6 +29,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.redis.testcontainers.RedisContainer;
+import com.saas.foundation.domain.tenant.SubscriptionStatus;
 import com.saas.foundation.domain.tenant.Tenant;
 import com.saas.foundation.integration.email.SimulatedEmailProviderClient;
 import com.saas.foundation.domain.tenant.TenantRepository;
@@ -212,7 +213,9 @@ class MembershipIT {
 
     private Account account(String label) {
         String email = label + "-" + UUID.randomUUID() + "@acme.test";
-        Tenant tenant = tenantRepository.save(new Tenant("Tenant " + label));
+        Tenant tenant = new Tenant("Tenant " + label);
+        tenant.setSubscriptionStatus(SubscriptionStatus.ACTIVE);
+        tenantRepository.save(tenant);
         UserAccount user = userAccountRepository.save(new UserAccount(email, passwordEncoder.encode(PASSWORD)));
         tenantMembershipRepository.save(new TenantMembership(tenant.getId(), user.getId(), MembershipRole.OWNER));
         return new Account(tenant.getId(), user.getId(), email);

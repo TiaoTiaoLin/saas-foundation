@@ -35,6 +35,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.redis.testcontainers.RedisContainer;
 import com.saas.foundation.domain.product.ProductRepository;
+import com.saas.foundation.domain.tenant.SubscriptionStatus;
 import com.saas.foundation.domain.tenant.Tenant;
 import com.saas.foundation.domain.tenant.TenantRepository;
 import com.saas.foundation.domain.user.MembershipRole;
@@ -324,7 +325,9 @@ class AuthLoginIT {
     }
 
     private UUID givenUserInNewTenant(String email) {
-        Tenant tenant = tenantRepository.save(new Tenant("Tenant for " + email));
+        Tenant tenant = new Tenant("Tenant for " + email);
+        tenant.setSubscriptionStatus(SubscriptionStatus.ACTIVE);
+        tenantRepository.save(tenant);
         UserAccount user = userAccountRepository.save(new UserAccount(email, passwordEncoder.encode(PASSWORD)));
         tenantMembershipRepository.save(new TenantMembership(tenant.getId(), user.getId(), MembershipRole.OWNER));
         return tenant.getId();

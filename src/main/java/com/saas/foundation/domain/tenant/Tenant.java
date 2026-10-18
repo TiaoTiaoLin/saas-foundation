@@ -29,6 +29,17 @@ public class Tenant extends AuditedEntity {
     @Column(name = "logo_key", length = 160)
     private String logoKey;
 
+    @Column(name = "stripe_customer_id", length = 255)
+    private String stripeCustomerId;
+
+    @Column(name = "stripe_subscription_id", length = 255)
+    private String stripeSubscriptionId;
+
+    /** NONE until checkout completes. Only ACTIVE opens product routes. */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "subscription_status", nullable = false, length = 32)
+    private SubscriptionStatus subscriptionStatus = SubscriptionStatus.NONE;
+
     /** Required by JPA. */
     public Tenant() {
     }
@@ -39,5 +50,10 @@ public class Tenant extends AuditedEntity {
 
     public boolean isActive() {
         return status == TenantStatus.ACTIVE;
+    }
+
+    /** Product routes require an active organization and an active subscription. */
+    public boolean allowsProductAccess() {
+        return isActive() && subscriptionStatus == SubscriptionStatus.ACTIVE;
     }
 }

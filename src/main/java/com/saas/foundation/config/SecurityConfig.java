@@ -55,7 +55,8 @@ public class SecurityConfig {
                             "/api/v1/auth/logout",
                             "/api/v1/auth/password-resets",
                             "/api/v1/auth/password-resets/confirm",
-                            "/api/v1/tenants/registrations"
+                            "/api/v1/tenants/registrations",
+                            "/api/v1/billing/webhook"
                     ).permitAll();
                     if (local) {
                         auth.anyRequest().permitAll();
