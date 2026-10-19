@@ -32,6 +32,7 @@ import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.server.ResponseStatusException;
 
+import com.saas.foundation.audit.AuditRecorder;
 import com.saas.foundation.domain.tenant.Tenant;
 import com.saas.foundation.domain.tenant.TenantRepository;
 import com.saas.foundation.domain.tenant.TenantStatus;
@@ -494,7 +495,7 @@ class AuthServiceTest {
         RefreshTokenService refreshTokenService =
                 new RefreshTokenService(refreshTokens, new RefreshTokenProperties(refreshTtl));
         return new AuthService(users, memberships, tenants, passwordEncoder, tokenService, refreshTokenService,
-                entityManager, images);
+                entityManager, images, mock(AuditRecorder.class));
     }
 
     private UUID givenMembership(MembershipRole role, TenantStatus status) {

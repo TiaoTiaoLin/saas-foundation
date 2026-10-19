@@ -3,13 +3,11 @@ package com.saas.foundation.tenant.web;
 import java.util.UUID;
 import java.util.regex.Pattern;
 
-import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.stereotype.Component;
 import org.springframework.util.AntPathMatcher;
-import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.HandlerInterceptor;
 
 import com.saas.foundation.security.JwtTokenService;
@@ -35,8 +33,6 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 @Component
 public class TenantInterceptor implements HandlerInterceptor {
-
-    public static final String SUBSCRIPTION_REQUIRED = "An active subscription is required";
 
     private static final Pattern TENANT_ID_PATTERN = Pattern.compile(
             "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
@@ -79,9 +75,6 @@ public class TenantInterceptor implements HandlerInterceptor {
         if (!tenantResolver.isActive(tenantId) && !billingPath(request)) {
             throw new InvalidTenantException(tenantId);
         }
-        if (productPath(request) && !tenantResolver.allowsProductAccess(tenantId)) {
-            throw new ResponseStatusException(HttpStatus.PAYMENT_REQUIRED, SUBSCRIPTION_REQUIRED);
-        }
 
         TenantContext.setTenantId(tenantId);
         log.debug("Bound tenant context: tenantId={} fromToken={}", tenantId, tokenTenantId != null);
@@ -109,12 +102,6 @@ public class TenantInterceptor implements HandlerInterceptor {
     /** Billing stays available after a subscription ends so the owner can subscribe again. */
     private boolean billingPath(HttpServletRequest request) {
         return pathMatcher.match("/api/v1/billing/**", request.getRequestURI());
-    }
-
-    private boolean productPath(HttpServletRequest request) {
-        String path = request.getRequestURI();
-        return pathMatcher.match("/api/v1/products", path)
-                || pathMatcher.match("/api/v1/products/**", path);
     }
 
     private boolean isExcluded(HttpServletRequest request) {

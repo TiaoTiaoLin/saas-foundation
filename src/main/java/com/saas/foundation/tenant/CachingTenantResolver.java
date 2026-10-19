@@ -14,7 +14,7 @@ import lombok.extern.slf4j.Slf4j;
 
 /**
  * Tenant status and product access, cached in Redis and loaded from Postgres when a key is missing.
- * Product routes are open only while the organization is active and its subscription is active.
+ * Product routes are open while the organization is active. The audit log is not cached here.
  * Entries expire after {@code saas.tenancy.active-cache-ttl}. Saving a tenant drops both keys
  * once that transaction commits, so a status change is visible on the next request.
  */

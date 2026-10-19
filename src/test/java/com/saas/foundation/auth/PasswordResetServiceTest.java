@@ -23,6 +23,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.server.ResponseStatusException;
 
+import com.saas.foundation.audit.AuditRecorder;
 import com.saas.foundation.domain.user.PasswordResetToken;
 import com.saas.foundation.domain.user.PasswordResetTokenRepository;
 import com.saas.foundation.domain.user.RefreshTokenRepository;
@@ -79,7 +80,8 @@ class PasswordResetServiceTest {
                 passwordEncoder,
                 new RefreshTokenService(refreshTokens, new RefreshTokenProperties(Duration.ofDays(30))),
                 email,
-                new PasswordResetProperties(Duration.ofMinutes(30), "http://localhost:5173"));
+                new PasswordResetProperties(Duration.ofMinutes(30), "http://localhost:5173"),
+                mock(AuditRecorder.class));
     }
 
     @Test

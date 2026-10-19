@@ -19,6 +19,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import com.saas.foundation.audit.AuditRecorder;
+import com.saas.foundation.domain.audit.AuditAction;
+import com.saas.foundation.domain.audit.AuditTargetType;
 import com.saas.foundation.domain.tenant.Tenant;
 import com.saas.foundation.domain.tenant.TenantRepository;
 import com.saas.foundation.domain.user.MembershipInvite;
@@ -59,6 +62,7 @@ public class MembershipService {
     private final ResilientEmailService resilientEmailService;
     private final MembershipInviteProperties inviteProperties;
     private final ObjectStorage objectStorage;
+    private final AuditRecorder auditRecorder;
 
     public MembershipService(UserAccountRepository userAccountRepository,
                              TenantMembershipRepository tenantMembershipRepository,
@@ -67,7 +71,8 @@ public class MembershipService {
                              RefreshTokenRepository refreshTokenRepository,
                              ResilientEmailService resilientEmailService,
                              MembershipInviteProperties inviteProperties,
-                             ObjectStorage objectStorage) {
+                             ObjectStorage objectStorage,
+                             AuditRecorder auditRecorder) {
         this.userAccountRepository = userAccountRepository;
         this.tenantMembershipRepository = tenantMembershipRepository;
         this.membershipInviteRepository = membershipInviteRepository;
@@ -76,6 +81,7 @@ public class MembershipService {
         this.resilientEmailService = resilientEmailService;
         this.inviteProperties = inviteProperties;
         this.objectStorage = objectStorage;
+        this.auditRecorder = auditRecorder;
     }
 
     @Transactional(readOnly = true)
@@ -133,6 +139,13 @@ public class MembershipService {
         String link = acceptLink(token);
         EmailSendResult emailResult = resilientEmailService.sendMembershipInvite(
                 user.getEmail(), tenant.getName(), displayRole(request.role()), link);
+        auditRecorder.record(
+                AuditAction.MEMBERSHIP_INVITED,
+                tenantId,
+                callerId,
+                AuditTargetType.USER,
+                user.getId(),
+                Map.of("email", user.getEmail(), "role", request.role().name()));
         return new InviteMemberResponse(
                 user.getId(),
                 user.getEmail(),
@@ -167,6 +180,13 @@ public class MembershipService {
             }
         }
         invite.markAccepted(Instant.now());
+        auditRecorder.record(
+                AuditAction.MEMBERSHIP_ACCEPTED,
+                tenant.getId(),
+                callerId,
+                AuditTargetType.USER,
+                callerId,
+                Map.of("role", invite.getRole().name()));
         return new AcceptMembershipInviteResponse(tenant.getId(), tenant.getName(), invite.getRole());
     }
 
@@ -179,8 +199,19 @@ public class MembershipService {
         if (target.getRole() == MembershipRole.OWNER && role != MembershipRole.OWNER && ownerCount(memberships) == 1) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, KEEP_OWNER);
         }
+        MembershipRole previous = target.getRole();
         target.setRole(role);
-        return toResponse(target, requireUser(userId));
+        UserAccount user = requireUser(userId);
+        if (previous != role) {
+            auditRecorder.record(
+                    AuditAction.MEMBERSHIP_ROLE_CHANGED,
+                    tenantId,
+                    callerId,
+                    AuditTargetType.USER,
+                    userId,
+                    Map.of("email", user.getEmail(), "from", previous.name(), "to", role.name()));
+        }
+        return toResponse(target, user);
     }
 
     @Transactional
@@ -192,6 +223,14 @@ public class MembershipService {
         if (target.getRole() == MembershipRole.OWNER && ownerCount(memberships) == 1) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, KEEP_OWNER);
         }
+        UserAccount user = requireUser(userId);
+        auditRecorder.record(
+                AuditAction.MEMBERSHIP_REMOVED,
+                tenantId,
+                callerId,
+                AuditTargetType.USER,
+                userId,
+                Map.of("email", user.getEmail(), "role", target.getRole().name()));
         refreshTokenRepository.revokeAllActive(userId, tenantId, Instant.now());
         tenantMembershipRepository.delete(target);
     }

@@ -19,6 +19,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.server.ResponseStatusException;
 
+import com.saas.foundation.audit.AuditRecorder;
 import com.saas.foundation.domain.tenant.Tenant;
 import com.saas.foundation.domain.tenant.TenantRepository;
 import com.saas.foundation.domain.user.MembershipRole;
@@ -40,7 +41,7 @@ class OrganizationServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new OrganizationService(tenants, memberships, images);
+        service = new OrganizationService(tenants, memberships, images, mock(AuditRecorder.class));
         tenant = new Tenant("Acme");
         ReflectionTestUtils.setField(tenant, "id", UUID.randomUUID());
         TenantContext.setTenantId(tenant.getId().toString());

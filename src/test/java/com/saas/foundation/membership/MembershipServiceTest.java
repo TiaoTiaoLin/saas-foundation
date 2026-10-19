@@ -26,6 +26,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.server.ResponseStatusException;
 
+import com.saas.foundation.audit.AuditRecorder;
 import com.saas.foundation.domain.tenant.Tenant;
 import com.saas.foundation.domain.tenant.TenantRepository;
 import com.saas.foundation.domain.user.MembershipInvite;
@@ -60,6 +61,9 @@ class MembershipServiceTest {
     private TenantRepository tenants;
 
     @Mock
+    private AuditRecorder audit;
+
+    @Mock
     private RefreshTokenRepository refreshTokens;
 
     private final StubEmail email = new StubEmail();
@@ -80,7 +84,8 @@ class MembershipServiceTest {
                 refreshTokens,
                 email,
                 new MembershipInviteProperties(Duration.ofDays(7), "http://localhost:5173"),
-                new MemoryObjectStorage());
+                new MemoryObjectStorage(),
+                audit);
         tenantId = UUID.randomUUID();
         TenantContext.setTenantId(tenantId.toString());
         owner = user("owner@acme.test");
@@ -224,6 +229,7 @@ class MembershipServiceTest {
     void ownerCanRemoveAMember() {
         UserAccount guest = user("guest@acme.test");
         TenantMembership guestMembership = membership(guest.getId(), MembershipRole.MEMBER);
+        when(users.findById(guest.getId())).thenReturn(Optional.of(guest));
         when(memberships.findByTenantIdForUpdate(tenantId)).thenReturn(List.of(ownerMembership, guestMembership));
 
         service.remove(owner.getId(), guest.getId());

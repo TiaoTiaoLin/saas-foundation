@@ -3,14 +3,19 @@ package com.saas.foundation.billing;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.HexFormat;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -25,6 +30,9 @@ import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.server.ResponseStatusException;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.saas.foundation.audit.AuditRecorder;
+import com.saas.foundation.domain.audit.AuditAction;
+import com.saas.foundation.domain.audit.AuditTargetType;
 import com.saas.foundation.domain.billing.BillingEvent;
 import com.saas.foundation.domain.billing.BillingEventRepository;
 import com.saas.foundation.domain.tenant.SubscriptionStatus;
@@ -48,6 +56,7 @@ class BillingServiceTest {
     private final TenantRepository tenants = mock(TenantRepository.class);
     private final TenantMembershipRepository memberships = mock(TenantMembershipRepository.class);
     private final UserAccountRepository users = mock(UserAccountRepository.class);
+    private final AuditRecorder audit = mock(AuditRecorder.class);
 
     private BillingService service;
     private Tenant tenant;
@@ -100,6 +109,7 @@ class BillingServiceTest {
 
     @Test
     void anActiveSubscriptionIsNotReplaced() {
+        tenant.setPlan(com.saas.foundation.domain.tenant.Plan.PRO);
         tenant.setSubscriptionStatus(SubscriptionStatus.ACTIVE);
         tenant.setStripeSubscriptionId("sub_live");
 
@@ -129,15 +139,43 @@ class BillingServiceTest {
         service.apply(payload, event);
 
         assertThat(tenant.getSubscriptionStatus()).isEqualTo(SubscriptionStatus.CANCELED);
-        assertThat(tenant.allowsProductAccess()).isFalse();
+        assertThat(tenant.getPlan()).isEqualTo(com.saas.foundation.domain.tenant.Plan.FREE);
+        assertThat(tenant.allowsProductAccess()).isTrue();
+        assertThat(tenant.allowsAuditAccess()).isFalse();
         assertThat(tenant.getStripeCustomerId()).isEqualTo("cus_123");
         verify(events).save(any(BillingEvent.class));
+        verify(audit).record(
+                eq(AuditAction.BILLING_SUBSCRIPTION_CHANGED),
+                eq(tenant.getId()),
+                isNull(),
+                eq(AuditTargetType.SUBSCRIPTION),
+                eq(tenant.getId()),
+                eq(Map.of("from", "ACTIVE", "to", "CANCELED", "planFrom", "FREE", "planTo", "FREE")));
 
+        clearInvocations(audit);
         tenant.setSubscriptionStatus(SubscriptionStatus.ACTIVE);
         when(events.existsById("evt_1")).thenReturn(true);
         service.apply(payload, event);
 
         assertThat(tenant.getSubscriptionStatus()).isEqualTo(SubscriptionStatus.ACTIVE);
+        verifyNoInteractions(audit);
+    }
+
+    @Test
+    void theProPriceOpensTheAuditLogUntilTheSubscriptionEnds() throws Exception {
+        String activated = subscriptionPayload("evt_pro", tenant.getId(), "active", "price_123");
+        service.apply(activated, service.verify(activated, signature(activated)));
+
+        assertThat(tenant.getPlan()).isEqualTo(com.saas.foundation.domain.tenant.Plan.PRO);
+        assertThat(tenant.allowsAuditAccess()).isTrue();
+        assertThat(tenant.allowsProductAccess()).isTrue();
+
+        String canceled = subscriptionPayload("evt_pro_end", tenant.getId(), "canceled", "price_123");
+        service.apply(canceled, service.verify(canceled, signature(canceled)));
+
+        assertThat(tenant.getPlan()).isEqualTo(com.saas.foundation.domain.tenant.Plan.FREE);
+        assertThat(tenant.allowsAuditAccess()).isFalse();
+        assertThat(tenant.allowsProductAccess()).isTrue();
     }
 
     @Test
@@ -149,13 +187,20 @@ class BillingServiceTest {
 
     private BillingService serviceWith(BillingProperties properties) {
         return new BillingService(
-                properties, gateway, events, tenants, memberships, users, new ObjectMapper());
+                properties, gateway, events, tenants, memberships, users, new ObjectMapper(), audit);
     }
 
     private static String subscriptionPayload(UUID tenantId, String status) {
+        return subscriptionPayload("evt_1", tenantId, status, null);
+    }
+
+    private static String subscriptionPayload(String eventId, UUID tenantId, String status, String priceId) {
+        String items = priceId == null
+                ? ""
+                : ",\"items\":{\"data\":[{\"price\":{\"id\":\"" + priceId + "\"}}]}";
         return """
                 {
-                  "id": "evt_1",
+                  "id": "%s",
                   "object": "event",
                   "api_version": "2024-06-20",
                   "created": 1710000000,
@@ -169,11 +214,11 @@ class BillingServiceTest {
                       "object": "subscription",
                       "customer": "cus_123",
                       "status": "%s",
-                      "metadata": {"tenant_id": "%s"}
+                      "metadata": {"tenant_id": "%s"}%s
                     }
                   }
                 }
-                """.formatted(status, tenantId);
+                """.formatted(eventId, status, tenantId, items);
     }
 
     private static String signature(String payload) throws Exception {

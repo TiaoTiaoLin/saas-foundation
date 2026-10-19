@@ -10,12 +10,12 @@ import jakarta.validation.constraints.NotBlank;
 public record BillingProperties(
         String secretKey,
         String webhookSecret,
-        String priceId,
+        String proPriceId,
         @NotBlank String appBaseUrl
 ) {
 
     public boolean configured() {
-        return present(secretKey) && present(webhookSecret) && present(priceId);
+        return present(secretKey) && present(webhookSecret) && present(proPriceId);
     }
 
     public String successUrl() {

@@ -1,6 +1,7 @@
 package com.saas.foundation.billing;
 
 import java.time.Instant;
+import java.util.Map;
 import java.util.UUID;
 
 import org.springframework.http.HttpStatus;
@@ -10,8 +11,12 @@ import org.springframework.web.server.ResponseStatusException;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.saas.foundation.audit.AuditRecorder;
+import com.saas.foundation.domain.audit.AuditAction;
+import com.saas.foundation.domain.audit.AuditTargetType;
 import com.saas.foundation.domain.billing.BillingEvent;
 import com.saas.foundation.domain.billing.BillingEventRepository;
+import com.saas.foundation.domain.tenant.Plan;
 import com.saas.foundation.domain.tenant.SubscriptionStatus;
 import com.saas.foundation.domain.tenant.Tenant;
 import com.saas.foundation.domain.tenant.TenantRepository;
@@ -43,6 +48,7 @@ public class BillingService {
     private final TenantMembershipRepository tenantMembershipRepository;
     private final UserAccountRepository userAccountRepository;
     private final ObjectMapper objectMapper;
+    private final AuditRecorder auditRecorder;
 
     public BillingService(BillingProperties properties,
                           BillingGateway billingGateway,
@@ -50,7 +56,8 @@ public class BillingService {
                           TenantRepository tenantRepository,
                           TenantMembershipRepository tenantMembershipRepository,
                           UserAccountRepository userAccountRepository,
-                          ObjectMapper objectMapper) {
+                          ObjectMapper objectMapper,
+                          AuditRecorder auditRecorder) {
         this.properties = properties;
         this.billingGateway = billingGateway;
         this.billingEventRepository = billingEventRepository;
@@ -58,6 +65,7 @@ public class BillingService {
         this.tenantMembershipRepository = tenantMembershipRepository;
         this.userAccountRepository = userAccountRepository;
         this.objectMapper = objectMapper;
+        this.auditRecorder = auditRecorder;
     }
 
     @Transactional(readOnly = true)
@@ -65,8 +73,10 @@ public class BillingService {
         Tenant tenant = requireTenant(currentTenantId());
         boolean owner = isOwner(tenant.getId(), userId);
         return new BillingResponse(
+                planName(tenant),
                 statusName(tenant),
                 tenant.allowsProductAccess(),
+                tenant.allowsAuditAccess(),
                 properties.configured(),
                 owner && properties.configured() && canStartCheckout(tenant),
                 owner && tenant.getStripeCustomerId() != null && !tenant.getStripeCustomerId().isBlank());
@@ -85,7 +95,7 @@ public class BillingService {
                 .filter(UserAccount::isEnabled)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Sign in again to continue."));
         String url = billingGateway.createCheckoutSession(new CheckoutCommand(
-                properties.priceId(),
+                properties.proPriceId(),
                 tenant.getStripeCustomerId(),
                 user.getEmail(),
                 tenantId.toString(),
@@ -136,6 +146,8 @@ public class BillingService {
         if (tenant == null) {
             return;
         }
+        SubscriptionStatus beforeStatus = tenant.getSubscriptionStatus();
+        Plan beforePlan = planOf(tenant);
         String customerId = textId(object.path("customer"));
         String subscriptionId = textId(object.path("subscription"));
         if (customerId != null) {
@@ -146,7 +158,9 @@ public class BillingService {
         }
         if ("complete".equals(object.path("status").asText())) {
             tenant.setSubscriptionStatus(SubscriptionStatus.ACTIVE);
+            tenant.setPlan(Plan.PRO);
         }
+        recordPlanChange(tenant, beforeStatus, beforePlan);
         log.info("Checkout completed tenantId={} subscriptionStatus={}", tenant.getId(), tenant.getSubscriptionStatus());
     }
 
@@ -155,15 +169,35 @@ public class BillingService {
         if (tenant == null) {
             return;
         }
-        String customerId = textId(object.path("customer"));
-        if (customerId != null) {
-            tenant.setStripeCustomerId(customerId);
+        SubscriptionStatus beforeStatus = tenant.getSubscriptionStatus();
+        Plan beforePlan = planOf(tenant);
+        String subscriptionId = object.path("id").isTextual() ? object.path("id").asText() : null;
+        String eventPriceId = priceId(object);
+        boolean proPrice = !eventPriceId.isEmpty() && eventPriceId.equals(properties.proPriceId());
+        boolean trackedPro = subscriptionId != null
+                && subscriptionId.equals(tenant.getStripeSubscriptionId())
+                && beforePlan == Plan.PRO;
+        if (!proPrice && !trackedPro) {
+            if (beforePlan == Plan.PRO) {
+                return;
+            }
+            applyStripeIdentity(tenant, object, subscriptionId);
+            tenant.setSubscriptionStatus(mapStatus(object.path("status").asText("")));
+            tenant.setPlan(Plan.FREE);
+            recordPlanChange(tenant, beforeStatus, beforePlan);
+            log.info("Subscription kept the free plan tenantId={} subscriptionStatus={}",
+                    tenant.getId(), tenant.getSubscriptionStatus());
+            return;
         }
-        if (object.path("id").isTextual()) {
-            tenant.setStripeSubscriptionId(object.path("id").asText());
-        }
-        tenant.setSubscriptionStatus(mapStatus(object.path("status").asText("")));
-        log.info("Subscription updated tenantId={} subscriptionStatus={}", tenant.getId(), tenant.getSubscriptionStatus());
+        applyStripeIdentity(tenant, object, subscriptionId);
+        SubscriptionStatus next = mapStatus(object.path("status").asText(""));
+        tenant.setSubscriptionStatus(next);
+        tenant.setPlan(next == SubscriptionStatus.ACTIVE || next == SubscriptionStatus.PAST_DUE
+                ? Plan.PRO
+                : Plan.FREE);
+        recordPlanChange(tenant, beforeStatus, beforePlan);
+        log.info("Subscription updated tenantId={} plan={} subscriptionStatus={}",
+                tenant.getId(), tenant.getPlan(), tenant.getSubscriptionStatus());
     }
 
     private Tenant findTenant(JsonNode object) {
@@ -214,16 +248,69 @@ public class BillingService {
         }
     }
 
+    private static void applyStripeIdentity(Tenant tenant, JsonNode object, String subscriptionId) {
+        String customerId = textId(object.path("customer"));
+        if (customerId != null) {
+            tenant.setStripeCustomerId(customerId);
+        }
+        if (subscriptionId != null) {
+            tenant.setStripeSubscriptionId(subscriptionId);
+        }
+    }
+
+    /** Price id from a subscription object. Empty when the event does not carry one. */
+    static String priceId(JsonNode subscription) {
+        JsonNode item = subscription.path("items").path("data").path(0);
+        if (item.path("price").path("id").isTextual()) {
+            return item.path("price").path("id").asText();
+        }
+        if (item.path("plan").path("id").isTextual()) {
+            return item.path("plan").path("id").asText();
+        }
+        if (subscription.path("plan").path("id").isTextual()) {
+            return subscription.path("plan").path("id").asText();
+        }
+        return "";
+    }
+
     private static boolean canStartCheckout(Tenant tenant) {
-        SubscriptionStatus status = tenant.getSubscriptionStatus();
-        return status == null
-                || status == SubscriptionStatus.NONE
-                || status == SubscriptionStatus.CANCELED
-                || status == SubscriptionStatus.INCOMPLETE;
+        return !tenant.hasOpenProSubscription();
+    }
+
+    private void recordPlanChange(Tenant tenant, SubscriptionStatus beforeStatus, Plan beforePlan) {
+        if (beforeStatus == tenant.getSubscriptionStatus() && beforePlan == tenant.getPlan()) {
+            return;
+        }
+        auditRecorder.record(
+                AuditAction.BILLING_SUBSCRIPTION_CHANGED,
+                tenant.getId(),
+                null,
+                AuditTargetType.SUBSCRIPTION,
+                tenant.getId(),
+                Map.of(
+                        "from", statusName(beforeStatus),
+                        "to", statusName(tenant.getSubscriptionStatus()),
+                        "planFrom", planName(beforePlan),
+                        "planTo", planName(tenant.getPlan())));
+    }
+
+    private static Plan planOf(Tenant tenant) {
+        return tenant.getPlan() == null ? Plan.FREE : tenant.getPlan();
+    }
+
+    private static String planName(Tenant tenant) {
+        return planName(planOf(tenant));
+    }
+
+    private static String planName(Plan plan) {
+        return plan == null ? Plan.FREE.name() : plan.name();
     }
 
     private static String statusName(Tenant tenant) {
-        SubscriptionStatus status = tenant.getSubscriptionStatus();
+        return statusName(tenant.getSubscriptionStatus());
+    }
+
+    private static String statusName(SubscriptionStatus status) {
         return status == null ? SubscriptionStatus.NONE.name() : status.name();
     }
 

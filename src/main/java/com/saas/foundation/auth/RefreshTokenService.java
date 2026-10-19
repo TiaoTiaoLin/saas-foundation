@@ -3,6 +3,7 @@ package com.saas.foundation.auth;
 import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.Base64;
+import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.http.HttpStatus;
@@ -81,6 +82,13 @@ public class RefreshTokenService {
     /** Revokes every open session for the user, in every tenant. */
     public void revokeAllForUser(UUID userId) {
         refreshTokenRepository.revokeAllActiveForUser(userId, Instant.now());
+    }
+
+    public Optional<RefreshToken> findByRawToken(String rawToken) {
+        if (rawToken == null || rawToken.isBlank()) {
+            return Optional.empty();
+        }
+        return refreshTokenRepository.findByTokenHash(Hashing.sha256Hex(rawToken));
     }
 
     /** Idempotent: unknown or already revoked tokens are ignored. */

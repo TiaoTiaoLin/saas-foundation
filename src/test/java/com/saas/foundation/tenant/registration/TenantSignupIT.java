@@ -27,7 +27,6 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.redis.testcontainers.RedisContainer;
 import com.saas.foundation.domain.user.MembershipRole;
-import com.saas.foundation.tenant.web.TenantInterceptor;
 import com.saas.foundation.domain.user.TenantMembershipRepository;
 import com.saas.foundation.domain.user.UserAccountRepository;
 import com.saas.foundation.support.PostgresRedisContainers;
@@ -95,8 +94,8 @@ class TenantSignupIT {
         String token = objectMapper.readTree(login.getResponse().getContentAsString()).get("accessToken").asText();
 
         mockMvc.perform(get("/api/v1/products").header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
-                .andExpect(status().isPaymentRequired())
-                .andExpect(jsonPath("$.message").value(TenantInterceptor.SUBSCRIPTION_REQUIRED));
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items").isArray());
     }
 
     @Test

@@ -4,6 +4,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -13,7 +14,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import com.saas.foundation.audit.AuditRecorder;
 import com.saas.foundation.auth.RefreshTokenService.IssuedRefreshToken;
+import com.saas.foundation.domain.audit.AuditAction;
+import com.saas.foundation.domain.audit.AuditTargetType;
 import com.saas.foundation.domain.tenant.Tenant;
 import com.saas.foundation.domain.tenant.TenantRepository;
 import com.saas.foundation.domain.user.MembershipRole;
@@ -47,6 +51,7 @@ public class AuthService {
     private final RefreshTokenService refreshTokenService;
     private final EntityManager entityManager;
     private final ObjectStorage objectStorage;
+    private final AuditRecorder auditRecorder;
 
     /** Compared against when the email is unknown, so response time does not reveal which emails exist. */
     private final String dummyPasswordHash;
@@ -58,7 +63,8 @@ public class AuthService {
                        JwtTokenService jwtTokenService,
                        RefreshTokenService refreshTokenService,
                        EntityManager entityManager,
-                       ObjectStorage objectStorage) {
+                       ObjectStorage objectStorage,
+                       AuditRecorder auditRecorder) {
         this.userAccountRepository = userAccountRepository;
         this.tenantMembershipRepository = tenantMembershipRepository;
         this.tenantRepository = tenantRepository;
@@ -67,6 +73,7 @@ public class AuthService {
         this.refreshTokenService = refreshTokenService;
         this.entityManager = entityManager;
         this.objectStorage = objectStorage;
+        this.auditRecorder = auditRecorder;
         this.dummyPasswordHash = passwordEncoder.encode("dummy-password-for-unknown-users");
     }
 
@@ -77,6 +84,13 @@ public class AuthService {
         requireActiveTenant(membership.getTenantId());
 
         IssuedRefreshToken refreshToken = refreshTokenService.issue(user.getId(), membership.getTenantId());
+        auditRecorder.record(
+                AuditAction.AUTH_LOGIN,
+                membership.getTenantId(),
+                user.getId(),
+                AuditTargetType.USER,
+                user.getId(),
+                Map.of("email", user.getEmail()));
         log.info("Login succeeded userId={} tenantId={}", user.getId(), membership.getTenantId());
         return tokenResponse(user, membership, refreshToken);
     }
@@ -142,6 +156,13 @@ public class AuthService {
 
     @Transactional
     public void logout(String rawRefreshToken) {
+        refreshTokenService.findByRawToken(rawRefreshToken).ifPresent(token -> auditRecorder.record(
+                AuditAction.AUTH_LOGOUT,
+                token.getTenantId(),
+                token.getUserId(),
+                AuditTargetType.USER,
+                token.getUserId(),
+                Map.of()));
         refreshTokenService.revoke(rawRefreshToken);
     }
 
@@ -178,6 +199,12 @@ public class AuthService {
         refreshTokenService.revokeAllForUser(user.getId());
 
         IssuedRefreshToken refreshToken = refreshTokenService.issue(user.getId(), membership.getTenantId());
+        auditRecorder.recordForEachMembership(
+                AuditAction.AUTH_PASSWORD_CHANGED,
+                user.getId(),
+                AuditTargetType.USER,
+                user.getId(),
+                Map.of("email", user.getEmail()));
         log.info("Password changed userId={} tenantId={}", user.getId(), membership.getTenantId());
         return tokenResponse(user, membership, refreshToken);
     }
@@ -221,6 +248,13 @@ public class AuthService {
                 soleMemberTenants.add(tenantId);
             }
         }
+
+        auditRecorder.recordForEachMembership(
+                AuditAction.AUTH_ACCOUNT_DELETED,
+                userId,
+                AuditTargetType.USER,
+                userId,
+                Map.of("email", user.getEmail()));
 
         String avatarKey = blankToNull(user.getAvatarKey());
         List<String> logoKeys = new ArrayList<>();

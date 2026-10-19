@@ -35,10 +35,15 @@ public class Tenant extends AuditedEntity {
     @Column(name = "stripe_subscription_id", length = 255)
     private String stripeSubscriptionId;
 
-    /** NONE until checkout completes. Only ACTIVE opens product routes. */
+    /** NONE until a Pro checkout completes. */
     @Enumerated(EnumType.STRING)
     @Column(name = "subscription_status", nullable = false, length = 32)
     private SubscriptionStatus subscriptionStatus = SubscriptionStatus.NONE;
+
+    /** FREE for every organization. PRO is granted by an active Pro subscription. */
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 16)
+    private Plan plan = Plan.FREE;
 
     /** Required by JPA. */
     public Tenant() {
@@ -52,8 +57,20 @@ public class Tenant extends AuditedEntity {
         return status == TenantStatus.ACTIVE;
     }
 
-    /** Product routes require an active organization and an active subscription. */
+    /** Products are included with the free plan while the organization is active. */
     public boolean allowsProductAccess() {
-        return isActive() && subscriptionStatus == SubscriptionStatus.ACTIVE;
+        return isActive();
+    }
+
+    /** The audit log is included with an active Pro subscription. */
+    public boolean allowsAuditAccess() {
+        return isActive() && plan == Plan.PRO && subscriptionStatus == SubscriptionStatus.ACTIVE;
+    }
+
+    /** An open Pro subscription should be managed, not replaced with a second checkout. */
+    public boolean hasOpenProSubscription() {
+        return plan == Plan.PRO
+                && (subscriptionStatus == SubscriptionStatus.ACTIVE
+                || subscriptionStatus == SubscriptionStatus.PAST_DUE);
     }
 }

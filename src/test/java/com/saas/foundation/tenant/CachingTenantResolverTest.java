@@ -89,33 +89,22 @@ class CachingTenantResolverTest {
     }
 
     @Test
-    void noSubscriptionBlocksProductAccess() {
+    void theFreePlanOpensProductAccess() {
         when(tenants.findById(tenantId)).thenReturn(Optional.of(tenant(TenantStatus.ACTIVE)));
 
         assertThat(resolver.isActive(tenantId.toString())).isTrue();
-        assertThat(resolver.allowsProductAccess(tenantId.toString())).isFalse();
-        assertThat(redis.values).containsEntry(PREFIX + "products:" + tenantId, "false");
-    }
-
-    @Test
-    void anActiveSubscriptionOpensProductAccess() {
-        Tenant subscribed = tenant(TenantStatus.ACTIVE);
-        subscribed.setSubscriptionStatus(SubscriptionStatus.ACTIVE);
-        when(tenants.findById(tenantId)).thenReturn(Optional.of(subscribed));
-
         assertThat(resolver.allowsProductAccess(tenantId.toString())).isTrue();
         assertThat(redis.values).containsEntry(PREFIX + "products:" + tenantId, "true");
     }
 
     @Test
-    void aCanceledSubscriptionBlocksProductAccess() {
+    void aCanceledSubscriptionKeepsProductAccess() {
         Tenant canceled = tenant(TenantStatus.ACTIVE);
         canceled.setSubscriptionStatus(SubscriptionStatus.CANCELED);
         when(tenants.findById(tenantId)).thenReturn(Optional.of(canceled));
 
         assertThat(resolver.isActive(tenantId.toString())).isTrue();
-        assertThat(resolver.allowsProductAccess(tenantId.toString())).isFalse();
-        assertThat(redis.values).containsEntry(PREFIX + "products:" + tenantId, "false");
+        assertThat(resolver.allowsProductAccess(tenantId.toString())).isTrue();
     }
 
     @Test

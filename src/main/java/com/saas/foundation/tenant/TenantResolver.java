@@ -9,6 +9,6 @@ public interface TenantResolver {
     /** The organization exists and has not been suspended. */
     boolean isActive(String tenantId);
 
-    /** Product routes are open only while the subscription is active. */
+    /** Product routes are open for an active organization on the free plan. */
     boolean allowsProductAccess(String tenantId);
 }

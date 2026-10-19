@@ -5,6 +5,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.Base64;
+import java.util.Map;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -14,6 +15,9 @@ import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.server.ResponseStatusException;
 
+import com.saas.foundation.audit.AuditRecorder;
+import com.saas.foundation.domain.audit.AuditAction;
+import com.saas.foundation.domain.audit.AuditTargetType;
 import com.saas.foundation.domain.user.PasswordResetToken;
 import com.saas.foundation.domain.user.PasswordResetTokenRepository;
 import com.saas.foundation.domain.user.UserAccount;
@@ -44,19 +48,22 @@ public class PasswordResetService {
     private final RefreshTokenService refreshTokenService;
     private final ResilientEmailService resilientEmailService;
     private final PasswordResetProperties properties;
+    private final AuditRecorder auditRecorder;
 
     public PasswordResetService(UserAccountRepository userAccountRepository,
                                 PasswordResetTokenRepository passwordResetTokenRepository,
                                 PasswordEncoder passwordEncoder,
                                 RefreshTokenService refreshTokenService,
                                 ResilientEmailService resilientEmailService,
-                                PasswordResetProperties properties) {
+                                PasswordResetProperties properties,
+                                AuditRecorder auditRecorder) {
         this.userAccountRepository = userAccountRepository;
         this.passwordResetTokenRepository = passwordResetTokenRepository;
         this.passwordEncoder = passwordEncoder;
         this.refreshTokenService = refreshTokenService;
         this.resilientEmailService = resilientEmailService;
         this.properties = properties;
+        this.auditRecorder = auditRecorder;
     }
 
     @Transactional
@@ -79,6 +86,12 @@ public class PasswordResetService {
         String link = resetLink(token);
         String recipient = user.getEmail();
         sendResetEmailAfterCommit(recipient, link);
+        auditRecorder.recordForEachMembership(
+                AuditAction.AUTH_PASSWORD_RESET_REQUESTED,
+                user.getId(),
+                AuditTargetType.USER,
+                user.getId(),
+                Map.of("email", user.getEmail()));
         log.info("Password reset requested userId={}", user.getId());
     }
 
@@ -121,6 +134,12 @@ public class PasswordResetService {
         user.setPasswordHash(passwordEncoder.encode(newPassword));
         reset.markUsed(now);
         refreshTokenService.revokeAllForUser(user.getId());
+        auditRecorder.recordForEachMembership(
+                AuditAction.AUTH_PASSWORD_RESET_CONFIRMED,
+                user.getId(),
+                AuditTargetType.USER,
+                user.getId(),
+                Map.of("email", user.getEmail()));
         log.info("Password reset confirmed userId={}", user.getId());
     }
 

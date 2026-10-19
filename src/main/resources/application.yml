@@ -227,7 +227,7 @@ saas:
   billing:
     secret-key: ${STRIPE_SECRET_KEY:}
     webhook-secret: ${STRIPE_WEBHOOK_SECRET:}
-    price-id: ${STRIPE_PRICE_ID:}
+    pro-price-id: ${STRIPE_PRO_PRICE_ID:}
     app-base-url: ${APP_BASE_URL:http://localhost:5173}
 
 logging:

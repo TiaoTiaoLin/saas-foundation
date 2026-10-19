@@ -1,5 +1,6 @@
 package com.saas.foundation.organization;
 
+import java.util.Map;
 import java.util.UUID;
 
 import org.springframework.http.HttpStatus;
@@ -7,6 +8,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import com.saas.foundation.audit.AuditRecorder;
+import com.saas.foundation.domain.audit.AuditAction;
+import com.saas.foundation.domain.audit.AuditTargetType;
 import com.saas.foundation.domain.tenant.Tenant;
 import com.saas.foundation.domain.tenant.TenantRepository;
 import com.saas.foundation.domain.user.MembershipRole;
@@ -26,13 +30,16 @@ public class OrganizationService {
     private final TenantRepository tenantRepository;
     private final TenantMembershipRepository tenantMembershipRepository;
     private final ObjectStorage objectStorage;
+    private final AuditRecorder auditRecorder;
 
     public OrganizationService(TenantRepository tenantRepository,
                                TenantMembershipRepository tenantMembershipRepository,
-                               ObjectStorage objectStorage) {
+                               ObjectStorage objectStorage,
+                               AuditRecorder auditRecorder) {
         this.tenantRepository = tenantRepository;
         this.tenantMembershipRepository = tenantMembershipRepository;
         this.objectStorage = objectStorage;
+        this.auditRecorder = auditRecorder;
     }
 
     @Transactional(readOnly = true)
@@ -51,6 +58,13 @@ public class OrganizationService {
         String previous = tenant.getLogoKey();
         tenant.setLogoKey(key);
         deleteQuietly(previous);
+        auditRecorder.record(
+                AuditAction.ORGANIZATION_LOGO_UPDATED,
+                tenantId,
+                userId,
+                AuditTargetType.ORGANIZATION,
+                tenantId,
+                Map.of());
         return response(tenant);
     }
 
@@ -62,6 +76,15 @@ public class OrganizationService {
         String previous = tenant.getLogoKey();
         tenant.setLogoKey(null);
         deleteQuietly(previous);
+        if (previous != null && !previous.isBlank()) {
+            auditRecorder.record(
+                    AuditAction.ORGANIZATION_LOGO_REMOVED,
+                    tenantId,
+                    userId,
+                    AuditTargetType.ORGANIZATION,
+                    tenantId,
+                    Map.of());
+        }
         return response(tenant);
     }
 
