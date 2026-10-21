@@ -8,6 +8,7 @@ import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -179,6 +180,40 @@ class BillingServiceTest {
     }
 
     @Test
+    void anOlderSubscriptionEventDoesNotReplaceACompletedCheckout() throws Exception {
+        String checkout = checkoutPayload("evt_checkout", tenant.getId(), 1_710_000_001L);
+        service.apply(checkout, service.verify(checkout, signature(checkout)));
+
+        assertThat(tenant.getPlan()).isEqualTo(com.saas.foundation.domain.tenant.Plan.PRO);
+        assertThat(tenant.getSubscriptionStatus()).isEqualTo(SubscriptionStatus.ACTIVE);
+        assertThat(tenant.getStripeEventCreatedAt()).isEqualTo(Instant.ofEpochSecond(1_710_000_001L));
+
+        clearInvocations(audit);
+        String older = subscriptionPayload("evt_old", tenant.getId(), "incomplete", "price_123", 1_710_000_000L);
+        service.apply(older, service.verify(older, signature(older)));
+
+        assertThat(tenant.getPlan()).isEqualTo(com.saas.foundation.domain.tenant.Plan.PRO);
+        assertThat(tenant.getSubscriptionStatus()).isEqualTo(SubscriptionStatus.ACTIVE);
+        assertThat(tenant.getStripeEventCreatedAt()).isEqualTo(Instant.ofEpochSecond(1_710_000_001L));
+        verifyNoInteractions(audit);
+        verify(events, times(2)).save(any(BillingEvent.class));
+    }
+
+    @Test
+    void anIncompleteEventAtTheSameSecondDoesNotReplacePro() throws Exception {
+        String activated = subscriptionPayload("evt_active", tenant.getId(), "active", "price_123", 1_710_000_000L);
+        service.apply(activated, service.verify(activated, signature(activated)));
+
+        clearInvocations(audit);
+        String incomplete = subscriptionPayload("evt_incomplete", tenant.getId(), "incomplete", "price_123", 1_710_000_000L);
+        service.apply(incomplete, service.verify(incomplete, signature(incomplete)));
+
+        assertThat(tenant.getPlan()).isEqualTo(com.saas.foundation.domain.tenant.Plan.PRO);
+        assertThat(tenant.getSubscriptionStatus()).isEqualTo(SubscriptionStatus.ACTIVE);
+        verifyNoInteractions(audit);
+    }
+
+    @Test
     void aBadSignatureIsRejected() {
         assertThatThrownBy(() -> service.verify("{}", "t=1,v1=deadbeef"))
                 .isInstanceOfSatisfying(ResponseStatusException.class, ex ->
@@ -195,6 +230,10 @@ class BillingServiceTest {
     }
 
     private static String subscriptionPayload(String eventId, UUID tenantId, String status, String priceId) {
+        return subscriptionPayload(eventId, tenantId, status, priceId, 1_710_000_000L);
+    }
+
+    private static String subscriptionPayload(String eventId, UUID tenantId, String status, String priceId, long created) {
         String items = priceId == null
                 ? ""
                 : ",\"items\":{\"data\":[{\"price\":{\"id\":\"" + priceId + "\"}}]}";
@@ -203,7 +242,7 @@ class BillingServiceTest {
                   "id": "%s",
                   "object": "event",
                   "api_version": "2024-06-20",
-                  "created": 1710000000,
+                  "created": %d,
                   "livemode": false,
                   "pending_webhooks": 1,
                   "type": "customer.subscription.updated",
@@ -218,7 +257,33 @@ class BillingServiceTest {
                     }
                   }
                 }
-                """.formatted(eventId, status, tenantId, items);
+                """.formatted(eventId, created, status, tenantId, items);
+    }
+
+    private static String checkoutPayload(String eventId, UUID tenantId, long created) {
+        return """
+                {
+                  "id": "%s",
+                  "object": "event",
+                  "api_version": "2024-06-20",
+                  "created": %d,
+                  "livemode": false,
+                  "pending_webhooks": 1,
+                  "type": "checkout.session.completed",
+                  "request": {"id": null, "idempotency_key": null},
+                  "data": {
+                    "object": {
+                      "id": "cs_123",
+                      "object": "checkout.session",
+                      "status": "complete",
+                      "customer": "cus_123",
+                      "subscription": "sub_123",
+                      "client_reference_id": "%s",
+                      "metadata": {"tenant_id": "%s"}
+                    }
+                  }
+                }
+                """.formatted(eventId, created, tenantId, tenantId);
     }
 
     private static String signature(String payload) throws Exception {

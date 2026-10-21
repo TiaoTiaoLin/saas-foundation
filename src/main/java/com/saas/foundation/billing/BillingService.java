@@ -132,18 +132,24 @@ public class BillingService {
             return;
         }
         JsonNode object = objectNode(payload).path("data").path("object");
+        Instant eventCreated = event.getCreated() == null ? null : Instant.ofEpochSecond(event.getCreated());
         switch (event.getType()) {
-            case "checkout.session.completed" -> applyCheckout(object);
+            case "checkout.session.completed" -> applyCheckout(object, eventCreated);
             case "customer.subscription.created", "customer.subscription.updated", "customer.subscription.deleted" ->
-                    applySubscription(object);
+                    applySubscription(object, eventCreated);
             default -> log.info("Ignoring Stripe event type={}", event.getType());
         }
         billingEventRepository.save(new BillingEvent(event.getId(), event.getType(), Instant.now()));
     }
 
-    private void applyCheckout(JsonNode object) {
+    private void applyCheckout(JsonNode object, Instant eventCreated) {
         Tenant tenant = findTenant(object);
         if (tenant == null) {
+            return;
+        }
+        if (stale(tenant, eventCreated, null)) {
+            log.info("Ignoring older Stripe checkout tenantId={} eventCreated={} applied={}",
+                    tenant.getId(), eventCreated, tenant.getStripeEventCreatedAt());
             return;
         }
         SubscriptionStatus beforeStatus = tenant.getSubscriptionStatus();
@@ -160,13 +166,20 @@ public class BillingService {
             tenant.setSubscriptionStatus(SubscriptionStatus.ACTIVE);
             tenant.setPlan(Plan.PRO);
         }
+        rememberEventTime(tenant, eventCreated);
         recordPlanChange(tenant, beforeStatus, beforePlan);
         log.info("Checkout completed tenantId={} subscriptionStatus={}", tenant.getId(), tenant.getSubscriptionStatus());
     }
 
-    private void applySubscription(JsonNode object) {
+    private void applySubscription(JsonNode object, Instant eventCreated) {
         Tenant tenant = findTenant(object);
         if (tenant == null) {
+            return;
+        }
+        SubscriptionStatus incoming = mapStatus(object.path("status").asText(""));
+        if (stale(tenant, eventCreated, incoming)) {
+            log.info("Ignoring stale Stripe subscription event tenantId={} eventCreated={} applied={}",
+                    tenant.getId(), eventCreated, tenant.getStripeEventCreatedAt());
             return;
         }
         SubscriptionStatus beforeStatus = tenant.getSubscriptionStatus();
@@ -182,19 +195,20 @@ public class BillingService {
                 return;
             }
             applyStripeIdentity(tenant, object, subscriptionId);
-            tenant.setSubscriptionStatus(mapStatus(object.path("status").asText("")));
+            tenant.setSubscriptionStatus(incoming);
             tenant.setPlan(Plan.FREE);
+            rememberEventTime(tenant, eventCreated);
             recordPlanChange(tenant, beforeStatus, beforePlan);
             log.info("Subscription kept the free plan tenantId={} subscriptionStatus={}",
                     tenant.getId(), tenant.getSubscriptionStatus());
             return;
         }
         applyStripeIdentity(tenant, object, subscriptionId);
-        SubscriptionStatus next = mapStatus(object.path("status").asText(""));
-        tenant.setSubscriptionStatus(next);
-        tenant.setPlan(next == SubscriptionStatus.ACTIVE || next == SubscriptionStatus.PAST_DUE
+        tenant.setSubscriptionStatus(incoming);
+        tenant.setPlan(incoming == SubscriptionStatus.ACTIVE || incoming == SubscriptionStatus.PAST_DUE
                 ? Plan.PRO
                 : Plan.FREE);
+        rememberEventTime(tenant, eventCreated);
         recordPlanChange(tenant, beforeStatus, beforePlan);
         log.info("Subscription updated tenantId={} plan={} subscriptionStatus={}",
                 tenant.getId(), tenant.getPlan(), tenant.getSubscriptionStatus());
@@ -229,6 +243,34 @@ public class BillingService {
     private static Tenant missing(String tenantId) {
         log.warn("No organization for Stripe tenant id={}", tenantId);
         return null;
+    }
+
+    /**
+     * Stripe {@code event.created} is seconds. An older snapshot must not replace a newer plan.
+     * A same-second {@code incomplete} snapshot must not replace an open Pro subscription.
+     */
+    private static boolean stale(Tenant tenant, Instant eventCreated, SubscriptionStatus incoming) {
+        Instant applied = tenant.getStripeEventCreatedAt();
+        if (eventCreated == null || applied == null) {
+            return false;
+        }
+        if (eventCreated.isBefore(applied)) {
+            return true;
+        }
+        return incoming == SubscriptionStatus.INCOMPLETE
+                && eventCreated.equals(applied)
+                && (tenant.getSubscriptionStatus() == SubscriptionStatus.ACTIVE
+                || tenant.getSubscriptionStatus() == SubscriptionStatus.PAST_DUE);
+    }
+
+    private static void rememberEventTime(Tenant tenant, Instant eventCreated) {
+        if (eventCreated == null) {
+            return;
+        }
+        Instant applied = tenant.getStripeEventCreatedAt();
+        if (applied == null || eventCreated.isAfter(applied)) {
+            tenant.setStripeEventCreatedAt(eventCreated);
+        }
     }
 
     static SubscriptionStatus mapStatus(String stripeStatus) {

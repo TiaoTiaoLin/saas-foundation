@@ -1,5 +1,7 @@
 package com.saas.foundation.domain.tenant;
 
+import java.time.Instant;
+
 import com.saas.foundation.domain.common.AuditedEntity;
 
 import jakarta.persistence.Column;
@@ -44,6 +46,10 @@ public class Tenant extends AuditedEntity {
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 16)
     private Plan plan = Plan.FREE;
+
+    /** Stripe {@code event.created} of the newest billing event applied to this organization. */
+    @Column(name = "stripe_event_created_at")
+    private Instant stripeEventCreatedAt;
 
     /** Required by JPA. */
     public Tenant() {
