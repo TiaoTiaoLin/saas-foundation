@@ -34,7 +34,7 @@ public class KafkaConfig {
     public NewTopic tenantRegisteredTopic(KafkaTopicsProperties topics) {
         return TopicBuilder.name(topics.tenantRegisteredTopic())
                 .partitions(2)
-                .replicas(2)
+                .replicas(topics.tenantRegisteredReplicas())
                 .build();
     }
 

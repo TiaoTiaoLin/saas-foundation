@@ -30,6 +30,54 @@ jobs:
       - name: Run Maven verify
         run: mvn -B verify
 
+      - name: Coverage summary
+        if: always()
+        run: |
+          if [ -f target/site/jacoco/jacoco.csv ]; then
+            awk -F, 'NR>1 { missed+=$4; covered+=$5 } END {
+              total=missed+covered;
+              if (total > 0) printf "### Test coverage\n\nInstructions covered: %.1f%% (%d of %d)\n", 100*covered/total, covered, total
+            }' target/site/jacoco/jacoco.csv >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jacoco-report
+          path: target/site/jacoco/
+          if-no-files-found: warn
+
+  validate-k8s:
+    name: Validate Kubernetes Manifests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install kubeconform
+        run: |
+          curl -sSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz \
+            | tar xz kubeconform
+          sudo mv kubeconform /usr/local/bin/
+
+      - name: Validate against the Kubernetes schemas
+        run: kubeconform -strict -summary k8s/deployment.yaml k8s/service.yaml k8s/configmap.yaml k8s/secret.example.yaml
+
+      - name: Every variable in application-prod.yml is supplied
+        run: |
+          set -euo pipefail
+          # Names the prod profile requires (no default after a colon).
+          required=$(grep -oE '\$\{[A-Z_]+\}' src/main/resources/application-prod.yml | tr -d '${}' | sort -u)
+          supplied=$(grep -hoE '^  [A-Z_]+:' k8s/configmap.yaml k8s/secret.example.yaml | tr -d ' :' | sort -u)
+          missing=$(comm -23 <(echo "$required") <(echo "$supplied") || true)
+          if [ -n "$missing" ]; then
+            echo "application-prod.yml needs these, but k8s/configmap.yaml and k8s/secret.example.yaml do not provide them:"
+            echo "$missing"
+            exit 1
+          fi
+          echo "All required prod variables are provided."
+
   build-and-push:
     name: Build Docker Image
     needs: test
@@ -87,7 +135,7 @@ jobs:
 
   generate-k8s:
     name: Generate Kubernetes Manifests
-    needs: build-and-push
+    needs: [build-and-push, validate-k8s]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
@@ -96,7 +144,6 @@ jobs:
 
       - name: Generate manifests with commit SHA image tag
         env:
-          IMAGE: ${{ needs.build-and-push.outputs.image_tag }}
           SHORT_SHA: ${{ needs.build-and-push.outputs.short_sha }}
         run: |
           set -euo pipefail
@@ -107,12 +154,15 @@ jobs:
 
           sed "s|IMAGE_PLACEHOLDER|${FULL_IMAGE}|g" k8s/deployment.yaml > k8s/generated/deployment.yaml
           cp k8s/service.yaml k8s/generated/service.yaml
+          cp k8s/configmap.yaml k8s/generated/configmap.yaml
 
           echo "Generated manifests for image: ${FULL_IMAGE}"
           echo "----- deployment.yaml -----"
           cat k8s/generated/deployment.yaml
           echo "----- service.yaml -----"
           cat k8s/generated/service.yaml
+          echo "----- configmap.yaml -----"
+          cat k8s/generated/configmap.yaml
 
       - name: Upload Kubernetes manifests
         uses: actions/upload-artifact@v4

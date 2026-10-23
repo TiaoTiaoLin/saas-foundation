@@ -29,6 +29,8 @@ server:
   forward-headers-strategy: framework
 
 saas:
+  kafka:
+    tenant-registered-replicas: 2
   cors:
     allowed-origins:
       - ${WEB_ORIGIN}

@@ -22,3 +22,6 @@ target/
 bin/
 out/
 k8s/generated/
+k8s/secret.yaml
+k8s/*.local.yaml
+docker/postgres/*.local.sql

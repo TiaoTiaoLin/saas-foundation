@@ -37,23 +37,18 @@ spec:
             - name: http
               containerPort: 8080
               protocol: TCP
+          # Everything application-prod.yml reads comes from these two objects.
+          # Non-secret settings: configmap.yaml. Credentials: secret.example.yaml (copy it, fill it, apply it).
+          envFrom:
+            - configMapRef:
+                name: saas-foundation-config
+            - secretRef:
+                name: saas-foundation-secrets
           env:
             - name: SPRING_PROFILES_ACTIVE
               value: "prod"
             - name: JAVA_OPTS
               value: "-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0"
-            - name: SPRING_DATASOURCE_URL
-              valueFrom:
-                secretKeyRef:
-                  name: saas-foundation-secrets
-                  key: datasource-url
-                  optional: true
-            - name: SPRING_DATA_REDIS_HOST
-              value: "redis"
-            - name: SPRING_KAFKA_BOOTSTRAP_SERVERS
-              value: "kafka:9092"
-            - name: MANAGEMENT_OTLP_TRACING_ENDPOINT
-              value: "http://otel-collector:4318/v1/traces"
           resources:
             requests:
               cpu: 250m
