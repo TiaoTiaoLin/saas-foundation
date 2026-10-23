@@ -2,6 +2,7 @@ package com.saas.foundation.common.exception;
 
 import java.util.List;
 
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
@@ -102,6 +103,15 @@ public class GlobalExceptionHandler {
         HttpStatus status = HttpStatus.valueOf(ex.getStatusCode().value());
         String message = ex.getReason() != null ? ex.getReason() : status.getReasonPhrase();
         return build(status, message, request.getRequestURI());
+    }
+
+    /** Another request changed the same row first. Nothing was written, so the caller can retry. */
+    @ExceptionHandler(OptimisticLockingFailureException.class)
+    public ResponseEntity<ApiError> handleOptimisticLock(OptimisticLockingFailureException ex,
+                                                         HttpServletRequest request) {
+        log.warn("Concurrent update conflict on {}", request.getRequestURI());
+        return build(HttpStatus.CONFLICT, "This was changed by another request. Try again.",
+                request.getRequestURI());
     }
 
     @ExceptionHandler(IllegalStateException.class)

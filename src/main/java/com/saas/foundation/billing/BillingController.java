@@ -15,8 +15,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
-import com.stripe.model.Event;
-
 import jakarta.servlet.http.HttpServletRequest;
 
 @RestController
@@ -24,9 +22,11 @@ import jakarta.servlet.http.HttpServletRequest;
 public class BillingController {
 
     private final BillingService billingService;
+    private final BillingWebhookProcessor webhookProcessor;
 
-    public BillingController(BillingService billingService) {
+    public BillingController(BillingService billingService, BillingWebhookProcessor webhookProcessor) {
         this.billingService = billingService;
+        this.webhookProcessor = webhookProcessor;
     }
 
     @GetMapping
@@ -52,8 +52,7 @@ public class BillingController {
     public void webhook(HttpServletRequest request) throws IOException {
         String payload = new String(request.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
         String signature = request.getHeader("Stripe-Signature");
-        Event event = billingService.verify(payload, signature);
-        billingService.apply(payload, event);
+        webhookProcessor.handle(payload, signature);
     }
 
     private static UUID currentUserId() {
