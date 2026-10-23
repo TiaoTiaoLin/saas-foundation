@@ -30,6 +30,7 @@ public class SecurityConfig {
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http, Environment environment) throws Exception {
+        refuseLocalProfileInProd(environment);
         boolean local = environment.acceptsProfiles(Profiles.of("local"));
 
         http
@@ -48,6 +49,12 @@ public class SecurityConfig {
                             "/actuator/prometheus"
                     ).permitAll();
                     auth.requestMatchers(HttpMethod.OPTIONS, "/**").permitAll();
+                    auth.requestMatchers(HttpMethod.GET,
+                            "/v3/api-docs",
+                            "/v3/api-docs/**",
+                            "/swagger-ui.html",
+                            "/swagger-ui/**"
+                    ).permitAll();
                     auth.requestMatchers(HttpMethod.GET, "/api/v1/media").permitAll();
                     auth.requestMatchers(HttpMethod.POST,
                             "/api/v1/auth/login",
@@ -66,6 +73,17 @@ public class SecurityConfig {
                 });
 
         return http.build();
+    }
+
+    /**
+     * The {@code local} profile lets requests through without a token. Starting with it next to
+     * {@code prod} would leave a deployed API open, so refuse to start.
+     */
+    static void refuseLocalProfileInProd(Environment environment) {
+        if (environment.acceptsProfiles(Profiles.of("local & prod"))) {
+            throw new IllegalStateException(
+                    "The 'local' profile disables authentication and cannot be active together with 'prod'");
+        }
     }
 
     private static JwtAuthenticationConverter jwtAuthenticationConverter() {
